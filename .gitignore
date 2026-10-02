@@ -1,0 +1,19 @@
+node_modules/
+dist/
+artifacts/
+*.zip
+
+# Local sync backups
+*.sync-conflict-*
+
+# Local credentials and settings
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and system files
+*.log
+Thumbs.db
+.DS_Store

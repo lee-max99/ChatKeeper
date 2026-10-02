@@ -1,0 +1,15 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>用 Python 整理阅读笔记 - ChatGPT</title><style>body{font:16px/1.7 sans-serif;max-width:800px;margin:30px auto}article{padding:20px;border-bottom:1px solid #ddd}pre{white-space:pre}</style></head><body><main>
+<article data-testid="conversation-turn-0"><div data-message-author-role="user" data-message-id="user-1"><div class="whitespace-pre-wrap">帮我写一个 Python 脚本，整理阅读笔记。
+请保留标题、表格和代码。</div></div></article>
+<article data-testid="conversation-turn-1"><div data-message-author-role="assistant" data-message-id="assistant-1"><div class="markdown">
+<h2>一个简单的开始</h2><p>将笔记放入文件夹，再按日期整理。你可以用下面的代码读取文件：</p><pre><div><span>python</span><button>复制代码</button></div><code class="language-python">from pathlib import Path
+
+for note in Path("notes").glob("*.md"):
+    print(note.name)
+    print("```fence```")
+</code></pre><table><thead><tr><th>字段</th><th>用途</th></tr></thead><tbody><tr><td>title</td><td>笔记标题</td></tr><tr><td>tags</td><td>阅读|技术<br>多个标签</td></tr></tbody></table>
+<p>公式：<span class="katex"><span class="katex-mathml"><math><semantics><msup><mi>x</mi><mn>2</mn></msup><annotation encoding="application/x-tex">x^2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true">x2</span></span></p><p><img src="https://assets.example.test/reference.png" alt="笔记结构示意图"></p><p><a href="https://docs.python.org/3/">Python 文档</a></p></div><button>点赞</button></div></article>
+<article data-testid="conversation-turn-2"><div data-message-author-role="user" data-message-id="user-2">可以再给一些建议吗？</div></article>
+<article data-testid="conversation-turn-3"><div data-message-author-role="assistant" data-message-id="assistant-2"><div class="markdown"><ul><li>每条笔记只讨论一个主题。</li><li>给相关笔记添加链接。</li><li>每周回顾一次。</li></ul><blockquote>好的笔记，是写给未来的自己。</blockquote></div></div></article>
+<div hidden><div data-message-author-role="assistant" data-message-id="hidden">不应导出旧分支</div></div>
+</main></body></html>

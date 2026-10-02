@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["chrome", "vite/client"]
+  },
+  "include": ["src", "tests/**/*.ts", "vitest.config.ts"],
+  "exclude": ["**/*.sync-conflict-*", "node_modules", "dist", "artifacts"]
+}
