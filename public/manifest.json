@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "ChatKeeper",
-  "version": "0.3.4",
-  "description": "将当前 ChatGPT 对话保存为 Markdown 或离线可读的 HTML。内容在本地处理。",
+  "version": "0.5.1",
+  "description": "通过提问目录定位当前 ChatGPT 对话，将完整记录保存为 Markdown 或离线 HTML。内容在本地处理。",
   "minimum_chrome_version": "109",
   "permissions": [
     "activeTab",
     "scripting",
-    "downloads"
+    "downloads",
+    "storage"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -28,6 +29,11 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [{
+    "matches": ["https://chatgpt.com/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'"
   }

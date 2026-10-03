@@ -34,6 +34,29 @@ it('cancels a pending request and never publishes a result after cancellation', 
   expect(request('CK_STATUS').error).toContain('取消');
   expect(request('CK_STATUS').data).toBeUndefined();
 });
+it('allows immediate preparation after cancellation without the old task overwriting or releasing the new task', async () => {
+  let sessionCalls = 0;
+  let finishSession!: (response: Response) => void;
+  vi.stubGlobal('fetch', (url: string, options: RequestInit) => {
+    if (!url.endsWith('/session')) return Promise.resolve(new Response(JSON.stringify(payload)));
+    sessionCalls++;
+    return new Promise<Response>((resolve, reject) => {
+      if (sessionCalls === 1) options.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      else finishSession = resolve;
+    });
+  });
+  const request = await setup();
+  expect(request('CK_PREPARE').ok).toBe(true);
+  request('CK_CANCEL');
+  window.history.replaceState({}, '', '/c/two');
+  expect(request('CK_PREPARE').ok).toBe(true);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(request('CK_STATUS').state).toBe('running');
+  expect(request('CK_PREPARE').ok).toBe(false);
+  finishSession(new Response(JSON.stringify({ accessToken: 'fixture-only' })));
+  await vi.waitFor(() => expect(request('CK_STATUS').state).toBe('done'));
+  expect(request('CK_STATUS').data.url).toBe('https://chatgpt.com/c/two');
+});
 it('exports the current URL conversation even when the page has no recognizable message metadata', async () => {
   const calls: string[] = [];
   vi.stubGlobal('fetch', async (url: string) => {

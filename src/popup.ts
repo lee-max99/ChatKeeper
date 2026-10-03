@@ -9,6 +9,7 @@ const save = element<HTMLButtonElement>('export');
 const refresh = element<HTMLButtonElement>('refresh');
 const cancel = element<HTMLButtonElement>('cancel');
 const status = element('status');
+const floatingEnabled = element<HTMLInputElement>('floating-enabled');
 let tabId: number | undefined;
 let info: PageInfo | undefined;
 let busy = false;
@@ -16,13 +17,13 @@ let downloadWhenReady = false;
 let polling: ReturnType<typeof setTimeout> | undefined;
 
 function format(): 'md' | 'html' { return document.querySelector<HTMLInputElement>('input[name="format"]:checked')?.value === 'html' ? 'html' : 'md'; }
-function setStatus(message: string, error = false): void { status.textContent = message; status.className = error ? 'error' : busy ? 'busy' : ''; }
+function setStatus(message: string, error = false): void { status.textContent = message; status.className = error ? 'error' : busy ? 'busy' : ''; status.parentElement!.hidden = !message; }
 function setBusy(value: boolean, cancellable = false): void {
   busy = value; save.disabled = value || !info || info.generating; refresh.disabled = value;
   title.disabled = value || !info; cancel.hidden = !cancellable; cancel.disabled = false;
   element('progress').hidden = !value;
   document.querySelectorAll<HTMLInputElement>('input[name="format"]').forEach(input => { input.disabled = value; });
-  save.textContent = value ? '正在准备…' : `导出 ${format() === 'md' ? 'Markdown' : 'HTML'}`;
+  save.textContent = value ? '正在准备…' : '导出';
 }
 async function request<T>(type: string): Promise<T> {
   const result = await chrome.tabs.sendMessage(tabId!, { type });
@@ -41,9 +42,9 @@ async function poll(): Promise<void> {
       polling = setTimeout(() => void poll(), 250); return;
     }
     if (job.state === 'error') throw new Error(job.error || '读取失败，请重试。');
-    if (job.state !== 'done' || !job.data) { setBusy(false); setStatus('选择格式，即可保存。'); return; }
+    if (job.state !== 'done' || !job.data) { setBusy(false); setStatus(''); return; }
     element('count').textContent = `${job.data.messages.length} 条消息`;
-    if (!downloadWhenReady) { setBusy(false); setStatus('对话已准备好，点击导出即可保存。'); return; }
+    if (!downloadWhenReady) { setBusy(false); setStatus('对话已准备好'); return; }
     downloadWhenReady = false;
     await request('CK_CHECK');
     setBusy(true); setStatus('正在生成文件…');
@@ -77,7 +78,7 @@ async function initialize(): Promise<void> {
     if (info.generating) { setBusy(false); setStatus('回答还在生成，结束后点击刷新。'); return; }
     const job = await request<ExportJob>('CK_STATUS');
     if (job.state === 'running' || job.state === 'done') { await poll(); return; }
-    setBusy(false); setStatus(job.state === 'error' ? job.error || '上次导出未完成，可以重试。' : '选择格式，即可保存。', job.state === 'error');
+    setBusy(false); setStatus(job.state === 'error' ? job.error || '上次导出未完成，可以重试。' : '', job.state === 'error');
   } catch (error) { info = undefined; fail(error); }
 }
 refresh.addEventListener('click', () => { if (!busy) void initialize(); });
@@ -86,5 +87,12 @@ cancel.addEventListener('click', () => {
   downloadWhenReady = false; cancel.disabled = true; setStatus('正在取消…');
   void request('CK_CANCEL').catch(fail);
 });
-document.querySelectorAll('input[name="format"]').forEach(input => input.addEventListener('change', () => setBusy(false)));
+document.querySelectorAll('input[name="format"]').forEach(input => input.addEventListener('change', () => { setBusy(false); void chrome.storage.local.set({ floatingFormat: format() }); }));
+floatingEnabled.addEventListener('change', () => {
+  void chrome.storage.local.set({ floatingEnabled: floatingEnabled.checked }).catch(fail);
+});
+void chrome.storage.local.get(['floatingEnabled', 'floatingFormat']).then(values => {
+  floatingEnabled.checked = values.floatingEnabled !== false;
+  document.querySelector<HTMLInputElement>(`input[value="${values.floatingFormat === 'html' ? 'html' : 'md'}"]`)!.checked = true;
+}).catch(fail);
 void initialize();

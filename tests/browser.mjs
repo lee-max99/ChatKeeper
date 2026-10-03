@@ -136,6 +136,11 @@ async function download(popup, format) {
 try {
   await source.goto('https://chatgpt.com/c/export-fixture');
   let popup = await openPopup();
+  assert.equal(await popup.evaluate(() => document.querySelector('#floating-enabled')?.checked), true, 'Popup provides an enabled-by-default floating control');
+  await popup.locator('#floating-enabled').click();
+  await source.waitForFunction(() => document.querySelector('#chatkeeper-widget')?.hidden === true);
+  await popup.locator('#floating-enabled').click();
+  await source.waitForFunction(() => document.querySelector('#chatkeeper-widget')?.hidden === false);
   assert.equal(await popup.locator('#title').inputValue(), '用 Python 整理阅读笔记');
   assert.equal(await popup.locator('#export').isEnabled(), true);
   assert.doesNotMatch(await popup.locator('body').innerText(), /采集|补采|导出范围/);

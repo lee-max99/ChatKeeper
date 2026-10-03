@@ -1,13 +1,14 @@
 {
   "name": "chatkeeper",
-  "version": "0.3.4",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && node scripts/build.mjs",
-    "test:e2e": "node tests/browser.mjs"
+    "test:e2e": "node tests/browser.mjs",
+    "test:floating": "node tests/floating.mjs"
   },
   "dependencies": {
     "dompurify": "^3.4.15",

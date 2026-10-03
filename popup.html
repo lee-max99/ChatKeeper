@@ -3,20 +3,19 @@
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ChatKeeper</title></head>
 <body>
   <main>
-    <header class="header"><div class="brand"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4.5h14v11H10l-5 4v-15Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 8h6M9 11.5h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><h1>ChatKeeper</h1></div><span class="version">v0.3.4</span></header>
+    <header class="header"><div class="brand"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4.5h14v11H10l-5 4v-15Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 8h6M9 11.5h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><h1>ChatKeeper</h1></div><button id="refresh" class="icon-button" type="button" title="刷新" aria-label="刷新对话信息">↻</button></header>
     <section class="conversation" aria-label="当前对话">
-      <div class="section-label"><label for="title">对话标题</label><span id="count">正在读取…</span></div>
-      <input id="title" maxlength="200" placeholder="正在读取…" disabled>
-      <div class="source-row"><span id="source">chatgpt.com</span><button id="refresh" class="text-button" type="button" title="刷新对话信息">刷新</button></div>
+      <span id="count" hidden></span><span id="source" hidden></span>
+      <input id="title" aria-label="导出标题" maxlength="200" placeholder="正在读取…" disabled>
     </section>
-    <fieldset><legend>导出格式</legend><div class="format-grid">
-      <label class="format-option"><input type="radio" name="format" value="md" checked><span><strong>Markdown</strong><em>编辑与整理笔记</em></span><small>.md</small></label>
-      <label class="format-option"><input type="radio" name="format" value="html"><span><strong>HTML</strong><em>目录、搜索与离线阅读</em></span><small>.html</small></label>
+    <fieldset aria-label="导出格式"><div class="format-grid">
+      <label class="format-option"><input type="radio" name="format" value="md" checked><span>Markdown</span></label>
+      <label class="format-option"><input type="radio" name="format" value="html"><span>HTML</span></label>
     </div></fieldset>
+    <button id="export" class="primary" type="button" disabled>导出</button>
     <div class="status-row"><span id="status" role="status" aria-live="polite">正在读取…</span><button id="cancel" class="text-button" type="button" hidden>取消</button></div>
     <div id="progress" class="progress" hidden><span></span></div>
-    <button id="export" class="primary" type="button" disabled>导出 Markdown</button>
-    <footer>本地处理 · 无需 API Key</footer>
+    <label class="preference"><span>页面目录</span><input id="floating-enabled" type="checkbox" role="switch" checked><span class="switch" aria-hidden="true"></span></label>
   </main>
   <script type="module" src="/src/popup.ts"></script>
 </body></html>

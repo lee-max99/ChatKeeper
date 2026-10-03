@@ -1,6 +1,8 @@
 chrome.runtime.onMessage.addListener((request, sender, respond) => {
   if (request?.type !== 'DOWNLOAD') return false;
-  if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) {
+  let fromPage = false;
+  try { const url = new URL(sender.url || ''); fromPage = sender.tab?.id !== undefined && sender.frameId === 0 && url.origin === 'https://chatgpt.com'; } catch { /* Reject invalid origins. */ }
+  if (sender.id !== chrome.runtime.id || (sender.url !== chrome.runtime.getURL('popup.html') && !fromPage)) {
     respond({ ok: false, error: '无效的下载来源。' }); return false;
   }
   if (typeof request.content !== 'string' || !request.content.trim() || request.content.length > 10_000_000 ||
@@ -15,3 +17,5 @@ chrome.runtime.onMessage.addListener((request, sender, respond) => {
   }).then(id => respond({ ok: true, id }), error => respond({ ok: false, error: `下载未开始：${String(error.message || error)}` }));
   return true;
 });
+
+export {};
