@@ -7,7 +7,8 @@ function errorText(error: unknown, fallback: string): string {
 }
 
 export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) => unknown, ready: (data: Conversation) => void, resized: () => void,
-  lifecycle: { started?: (purpose: 'outline' | 'download') => void; failed?: (error: unknown) => void } = {}) {
+  lifecycle: { started?: (purpose: 'outline' | 'download') => void; failed?: (error: unknown) => void;
+    prepareExport?: () => (data: Conversation) => Conversation; stateChanged?: () => void } = {}) {
   const button = root.getElementById('download') as HTMLButtonElement;
   const format = root.getElementById('download-format') as HTMLSelectElement;
   const read = root.getElementById('read-outline') as HTMLButtonElement;
@@ -15,6 +16,8 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
   const status = root.getElementById('download-status')!;
   let busy = false; let run = 0; let timer: ReturnType<typeof setTimeout> | undefined;
   let operation: 'outline' | 'download' | undefined;
+  let exportData: ((data: Conversation) => Conversation) | undefined;
+  let label = '下载'; let unavailable = false;
   const request = <T>(type: string): T => {
     const result = bridge(type) as T & { ok: boolean; error?: string };
     if (!result?.ok) throw new Error(result?.error || '连接已断开，请刷新页面。');
@@ -25,9 +28,10 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
     status.parentElement!.hidden = !text && !busy; resized();
   }
   function setBusy(value: boolean): void {
-    busy = value; button.disabled = value && operation === 'download'; format.disabled = value && operation === 'download'; read.disabled = value;
-    button.textContent = value && operation === 'download' ? '准备中…' : '下载'; button.setAttribute('aria-busy', String(value && operation === 'download'));
+    busy = value; button.disabled = unavailable || (value && operation === 'download'); format.disabled = value && operation === 'download'; read.disabled = value;
+    button.textContent = value && operation === 'download' ? '准备中…' : label; button.setAttribute('aria-busy', String(value && operation === 'download'));
     cancel.hidden = !value; cancel.disabled = false;
+    lifecycle.stateChanged?.();
   }
   async function poll(token: number, url: string): Promise<void> {
     if (token !== run || location.href !== url) return;
@@ -39,7 +43,7 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
       request('CK_CHECK'); ready(job.data);
       if (operation === 'outline') { setBusy(false); message(''); return; }
       const selected = format.value === 'html' ? 'html' : 'md';
-      const data = { ...job.data, exportedAt: new Date().toISOString() };
+      const data = { ...(exportData ? exportData(job.data) : job.data), exportedAt: new Date().toISOString() };
       const content = selected === 'html' ? renderHtml(data) : renderMarkdown(data);
       request('CK_CHECK');
       if (token !== run || location.href !== url) return;
@@ -55,6 +59,11 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
     }
   }
   function start(purpose: 'outline' | 'download'): void {
+    if (purpose === 'download') {
+      if (unavailable || (busy && operation === 'download')) return;
+      try { exportData = lifecycle.prepareExport?.(); }
+      catch (error) { message(errorText(error, '请选择至少一组问答。'), true); return; }
+    }
     if (busy) {
       if (purpose === 'download' && operation === 'outline') {
         operation = 'download'; setBusy(true); message('正在准备完整记录…');
@@ -81,7 +90,8 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
   format.addEventListener('change', () => { void chrome.storage.local.set({ floatingFormat: format.value }); });
   void chrome.storage.local.get('floatingFormat').then(values => { if (!busy) format.value = values.floatingFormat === 'html' ? 'html' : 'md'; }).catch(() => {});
   return {
-    start, message, get busy() { return busy; },
-    reset() { run++; clearTimeout(timer); operation = undefined; setBusy(false); message(''); },
+    start, message, get busy() { return busy; }, get downloading() { return busy && operation === 'download'; },
+    availability(text: string, disabled: boolean) { label = text; unavailable = disabled; setBusy(busy); },
+    reset() { run++; clearTimeout(timer); operation = undefined; exportData = undefined; setBusy(false); message(''); },
   };
 }

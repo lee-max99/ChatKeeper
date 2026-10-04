@@ -1,8 +1,48 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { mountFloatingDownload } from '../src/floating-download';
 import type { ExportJob } from '../src/types';
+import { selectQuestionGroups } from '../src/conversation-selection';
 
 afterEach(() => { document.body.innerHTML = ''; vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+it('does not start a file when a selected question disappears from the fresh saved path', async () => {
+  vi.useFakeTimers();
+  const host = document.createElement('div'); document.body.append(host); const root = host.attachShadow({ mode: 'open' });
+  root.innerHTML = '<select id="download-format"><option value="md">Markdown</option></select><button id="download"></button><button id="read-outline"></button><div><span id="download-status"></span><button id="download-cancel"></button></div>';
+  const send = vi.fn(async () => ({ ok: true }));
+  vi.stubGlobal('chrome', { runtime: { sendMessage: send }, storage: { local: { get: async () => ({}), set: async () => {} } } });
+  const old = { id: 'old', stable: true, role: 'user' as const, html: '', markdown: '原来所选的提问' };
+  const data = { title: '当前会话', url: location.href, exportedAt: '', warnings: [], messages: [{ ...old, id: 'new', markdown: '另一路径的提问' }] };
+  const bridge = (type: string) => type === 'CK_INFO' ? { ok: true, data: { generating: false } } : type === 'CK_STATUS' ? { ok: true, state: 'done', data } : { ok: true };
+  const controls = mountFloatingDownload(root, bridge, () => {}, () => {}, { prepareExport: () => fresh => selectQuestionGroups(fresh, [old]) });
+  controls.start('download'); await vi.advanceTimersByTimeAsync(0);
+  expect(send).not.toHaveBeenCalled(); expect(controls.busy).toBe(false);
+  expect(root.getElementById('download-status')!.textContent).toContain('所选提问已变化');
+  controls.reset();
+});
+
+it.each(['md', 'html'])('snapshots the selection before an outline read completes and exports only those Q&A groups (%s)', async format => {
+  vi.useFakeTimers();
+  const host = document.createElement('div'); document.body.append(host); const root = host.attachShadow({ mode: 'open' });
+  root.innerHTML = '<select id="download-format"><option value="md">Markdown</option><option value="html">HTML</option></select><button id="download"></button><button id="read-outline"></button><div><span id="download-status"></span><button id="download-cancel"></button></div>';
+  const send = vi.fn(async (_message: object) => ({ ok: true }));
+  vi.stubGlobal('chrome', { runtime: { sendMessage: send }, storage: { local: { get: async () => ({}), set: async () => {} } } });
+  const first = { id: 'u1', stable: true, role: 'user' as const, html: '', markdown: '所选提问' };
+  const second = { ...first, id: 'u2', markdown: '未选提问' };
+  const data = { title: '当前会话', url: location.href, exportedAt: '', warnings: [], messages: [first, { ...first, id: 'a1', role: 'assistant' as const, markdown: '所选回答' }, second] };
+  let choices = [first]; let job: ExportJob = { ok: true, state: 'running' };
+  const bridge = (type: string) => type === 'CK_INFO' ? { ok: true, data: { generating: false } } : type === 'CK_STATUS' ? job : { ok: true };
+  const controls = mountFloatingDownload(root, bridge, () => { choices = [second]; }, () => {}, {
+    prepareExport: () => { const snapshot = choices.map(item => ({ ...item })); return fresh => selectQuestionGroups(fresh, snapshot); },
+  });
+  controls.start('outline'); (root.getElementById('download-format') as HTMLSelectElement).value = format;
+  controls.start('download'); job = { ok: true, state: 'done', data }; await vi.advanceTimersByTimeAsync(200);
+  expect(send).toHaveBeenCalledOnce();
+  expect(send.mock.calls[0][0]).toMatchObject({ content: expect.stringContaining('所选提问') });
+  expect(send.mock.calls[0][0]).toMatchObject({ content: expect.stringContaining('所选回答') });
+  expect((send.mock.calls[0][0] as { content: string }).content).not.toContain('未选提问');
+  controls.reset();
+});
 
 it('lets a download join an automatic outline read and saves once without preparing a second copy', async () => {
   vi.useFakeTimers();

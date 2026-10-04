@@ -1,6 +1,7 @@
 import { floatingStyle } from './floating-style';
 import { collectQuestions, jumpToQuestion, outlinePageFingerprint, savedQuestionOutline, type OutlineEntry } from './question-outline';
 import { mountFloatingDownload } from './floating-download';
+import { mountFloatingSelection } from './floating-selection';
 import type { Conversation } from './types';
 import { conversationId } from './conversation-api';
 
@@ -12,7 +13,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `<style>${floatingStyle}</style><button id="launcher" title="提问目录" aria-label="打开提问目录" aria-expanded="false" aria-controls="panel">${icon}</button>
   <section id="panel" aria-label="ChatKeeper 提问目录" hidden><header id="drag-handle"><div class="brand">${icon}<span>ChatKeeper</span></div><button id="minimize" title="收起" aria-label="收起提问目录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></header>
-  <div class="summary"><h2 id="title"></h2><div class="meta"><span>提问目录</span><span id="count" aria-live="polite"></span></div></div>
+  <div class="summary"><h2 id="title"></h2><div class="meta"><span>提问目录</span><div class="meta-right"><span id="count" aria-live="polite"></span><button id="select-mode" type="button" aria-pressed="false">选择</button></div></div><div id="selection-tools" hidden><span id="selected-count" aria-live="polite"></span><div><button id="select-all" type="button">全选</button><button id="clear-selection" type="button">清空</button></div></div></div>
   <nav class="outline" aria-label="当前会话的提问"><ol id="questions"></ol><div id="empty" hidden><p>页面提问未识别，可读取保存的目录。</p><button id="read-outline" type="button">读取目录</button></div></nav>
   <footer class="downloads"><select id="download-format" aria-label="下载格式"><option value="md">Markdown</option><option value="html">HTML</option></select><button id="download" type="button">下载</button><div class="download-status" hidden><span id="download-status" role="status" aria-live="polite"></span><button id="download-cancel" type="button" hidden>取消</button></div></footer></section>`;
   const get = <T extends HTMLElement>(id: string) => root.getElementById(id) as T;
@@ -29,6 +30,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
   const questionVersion = (data?: Conversation) => JSON.stringify(data?.messages.filter(message => message.role === 'user').map(message => [message.id, message.markdown ?? message.html]));
   let position: Position | undefined; let dragged = false; let active = -1;
   let scrollFrame = 0;
+  let selection: ReturnType<typeof mountFloatingSelection> | undefined; let renderedSelecting = false;
 
   function place(): void {
     const box = host.getBoundingClientRect();
@@ -52,7 +54,9 @@ export function mountFloating(bridge: (type: string) => unknown): void {
     });
   }
   function render(next: OutlineEntry[]): void {
-    if (next.length === entries.length && next.every((entry, index) => entry.element === entries[index].element && entry.target === entries[index].target && entry.text === entries[index].text && entry.identity === entries[index].identity && entry.domIdentity === entries[index].domIdentity)) return;
+    const selecting = Boolean(selection?.active);
+    if (selecting === renderedSelecting && next.length === entries.length && next.every((entry, index) => entry.element === entries[index].element && entry.target === entries[index].target && entry.text === entries[index].text && entry.identity === entries[index].identity && entry.domIdentity === entries[index].domIdentity)) return;
+    renderedSelecting = selecting;
     const focusedIndex = buttons.findIndex(button => button === root.activeElement);
     const focusedEntry = entries[focusedIndex]; const scrollTop = list.parentElement!.scrollTop;
     entries = next; buttons = []; active = -1;
@@ -64,10 +68,12 @@ export function mountFloating(bridge: (type: string) => unknown): void {
       button.title = entry.text; button.setAttribute('aria-label', `第 ${index + 1} 个提问：${entry.text}`); button.append(number, text);
       button.addEventListener('click', () => {
         if (location.href !== renderedUrl) { dirty = true; update(); return; }
+        if (selection?.active) { selection.toggle(entry.identity); return; }
         const latest = usingSavedOutline && saved ? savedQuestionOutline(saved, document).find(item => item.identity === entry.identity) :
           collectQuestions(document).find(item => item.element === entry.element && item.target === entry.target);
         if (!latest || !jumpToQuestion(latest)) downloads.message('该提问尚未加载，请在聊天页加载后重试。');
       });
+      if (selecting && selection) item.append(selection.checkbox(entry, index));
       item.append(button); fragment.append(item); buttons.push(button);
     });
     list.replaceChildren(fragment); count.textContent = `${entries.length} 个提问`; empty.hidden = entries.length > 0;
@@ -90,6 +96,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
       if (changedConversation) staleQuestions = [...staleQuestions.filter(entry => entry.element?.isConnected), ...entries];
       // Invalidate only export preparation for the previous URL, including toolbar jobs.
       bridge('CK_STATUS'); downloads.reset(); saved = undefined; automaticReadUrl = '';
+      selection?.reset();
       usingSavedOutline = false; outlineFingerprint = ''; refreshAt = 0; refreshRetries = 0;
       waitingForContent = Boolean(changedConversation && (contentUrl !== location.href || contentVersion <= observedContentVersion));
       lastUrl = location.href; dirty = true;
@@ -103,7 +110,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
       dirty = false;
       staleQuestions = staleQuestions.filter(entry => entry.element?.isConnected);
       const pageQuestions = collectQuestions(document);
-      const current: OutlineEntry[] = usingSavedOutline && saved && !waitingForContent ? savedQuestionOutline(saved, document) : pageQuestions;
+      const current: OutlineEntry[] = selection?.active && !selection.ready ? [] : usingSavedOutline && saved && !waitingForContent ? savedQuestionOutline(saved, document) : pageQuestions;
       // A confirmed saved path belongs to this URL, including history shared with the previous chat.
       const next = usingSavedOutline && saved && !waitingForContent ? current :
         current.filter(entry => !staleQuestions.some(old => entry.element === old.element && entry.target === old.target && entry.text === old.text && entry.identity === (old.domIdentity ?? old.identity)));
@@ -122,7 +129,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
         }
       }
     }
-    empty.querySelector('p')!.textContent = waitingForContent ? '正在加载当前会话的提问…' : '页面提问未识别，可读取保存的目录。';
+    empty.querySelector('p')!.textContent = selection?.active && !selection.ready ? '读取完整目录后即可选择。' : waitingForContent ? '正在加载当前会话的提问…' : '页面提问未识别，可读取保存的目录。';
     get('read-outline').hidden = waitingForContent;
     if (waitingForContent) { count.textContent = '0 个提问'; empty.hidden = false; }
     highlight(); place();
@@ -130,7 +137,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
       const info = bridge('CK_INFO') as { ok: boolean; data?: { generating: boolean } };
       if (info.ok && !info.data?.generating) { refreshAt = 0; downloads.start('outline'); }
     }
-    if (!entries.length && !waitingForContent && automaticReadUrl !== location.href) {
+    if (!entries.length && !selection?.active && !waitingForContent && automaticReadUrl !== location.href) {
       try { conversationId(location.href); }
       catch { return; }
       automaticReadUrl = location.href; downloads.start('outline');
@@ -197,7 +204,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
     if (readWasRefresh && beforeReadQuestions === questionVersion(data) && refreshRetries > 0 && !refreshAt) {
       refreshRetries--; refreshAt = Date.now() + 1800;
     }
-    saved = data; dirty = true; update();
+    saved = data; selection?.sync(data); dirty = true; update();
   }, place, {
     started(purpose) {
       readWasRefresh = purpose === 'outline' && usingSavedOutline && Boolean(saved);
@@ -211,6 +218,12 @@ export function mountFloating(bridge: (type: string) => unknown): void {
         refreshAt = Date.now() + 800; refreshRetries = 1;
       } else { refreshAt = 0; refreshRetries = 0; }
     },
+    prepareExport: () => selection?.prepareExport() ?? (data => data),
+    stateChanged: () => selection?.lock(),
+  });
+  selection = mountFloatingSelection(root, {
+    read: () => downloads.start('outline'), changed: () => { dirty = true; update(); },
+    downloading: () => downloads.downloading, availability: downloads.availability, message: downloads.message,
   });
   document.body.append(host); update();
 }
