@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { collectQuestions, jumpToQuestion, savedQuestionOutline } from '../src/question-outline';
+import { collectQuestions, jumpToQuestion, outlinePageFingerprint, savedQuestionOutline } from '../src/question-outline';
 
 afterEach(() => { document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -127,4 +127,22 @@ it('scrolls a question into view with a header offset while preserving page styl
   jumpToQuestion(entry);
   expect(scroll).toHaveBeenCalledWith({ behavior: 'instant', block: 'start' });
   expect(entry.target.style.scrollMarginTop).toBe('24px');
+});
+
+it('rejects a cached target immediately when its content changes to an assistant message', () => {
+  document.body.innerHTML = '<main><article data-testid="conversation-turn-0"><div data-message-author-role="user">问题</div></article></main>';
+  const entry = collectQuestions(document)[0]; const scroll = vi.fn(); entry.target.scrollIntoView = scroll;
+  vi.stubGlobal('matchMedia', () => ({ matches: false }));
+  entry.element.setAttribute('data-message-role', 'assistant');
+  expect(jumpToQuestion(entry)).toBe(false);
+  expect(scroll).not.toHaveBeenCalled();
+});
+
+it('tracks attachment-only chat changes while ignoring hidden branches and composer controls', () => {
+  document.body.innerHTML = '<main><img id="attachment" alt="旧附件.png"><form><p>输入草稿</p><textarea>草稿</textarea></form><div hidden>旧分支</div></main>';
+  const before = outlinePageFingerprint(document);
+  document.querySelector('form p')!.textContent = '修改草稿'; document.querySelector('[hidden]')!.textContent = '后台旧分支变化';
+  expect(outlinePageFingerprint(document)).toBe(before);
+  document.querySelector('img')!.alt = '新附件.png';
+  expect(outlinePageFingerprint(document)).not.toBe(before);
 });

@@ -1,5 +1,5 @@
 import { floatingStyle } from './floating-style';
-import { collectQuestions, jumpToQuestion, savedQuestionOutline, type OutlineEntry } from './question-outline';
+import { collectQuestions, jumpToQuestion, outlinePageFingerprint, savedQuestionOutline, type OutlineEntry } from './question-outline';
 import { mountFloatingDownload } from './floating-download';
 import type { Conversation } from './types';
 import { conversationId } from './conversation-api';
@@ -24,6 +24,9 @@ export function mountFloating(bridge: (type: string) => unknown): void {
   let entries: OutlineEntry[] = []; let buttons: HTMLButtonElement[] = [];
   let staleQuestions: OutlineEntry[] = [];
   let saved: Conversation | undefined; let automaticReadUrl = '';
+  let usingSavedOutline = false; let outlineFingerprint = ''; let refreshAt = 0; let refreshRetries = 0;
+  let readWasRefresh = false; let beforeReadQuestions = '';
+  const questionVersion = (data?: Conversation) => JSON.stringify(data?.messages.filter(message => message.role === 'user').map(message => [message.id, message.markdown ?? message.html]));
   let position: Position | undefined; let dragged = false; let active = -1;
   let scrollFrame = 0;
 
@@ -49,7 +52,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
     });
   }
   function render(next: OutlineEntry[]): void {
-    if (next.length === entries.length && next.every((entry, index) => entry.element === entries[index].element && entry.target === entries[index].target && entry.text === entries[index].text && entry.identity === entries[index].identity)) return;
+    if (next.length === entries.length && next.every((entry, index) => entry.element === entries[index].element && entry.target === entries[index].target && entry.text === entries[index].text && entry.identity === entries[index].identity && entry.domIdentity === entries[index].domIdentity)) return;
     const focusedIndex = buttons.findIndex(button => button === root.activeElement);
     const focusedEntry = entries[focusedIndex]; const scrollTop = list.parentElement!.scrollTop;
     entries = next; buttons = []; active = -1;
@@ -61,7 +64,8 @@ export function mountFloating(bridge: (type: string) => unknown): void {
       button.title = entry.text; button.setAttribute('aria-label', `第 ${index + 1} 个提问：${entry.text}`); button.append(number, text);
       button.addEventListener('click', () => {
         if (location.href !== renderedUrl) { dirty = true; update(); return; }
-        const latest = entry.target?.isConnected ? entry : saved ? savedQuestionOutline(saved, document).find(item => item.identity === entry.identity) : entry;
+        const latest = usingSavedOutline && saved ? savedQuestionOutline(saved, document).find(item => item.identity === entry.identity) :
+          collectQuestions(document).find(item => item.element === entry.element && item.target === entry.target);
         if (!latest || !jumpToQuestion(latest)) downloads.message('该提问尚未加载，请在聊天页加载后重试。');
       });
       item.append(button); fragment.append(item); buttons.push(button);
@@ -86,6 +90,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
       if (changedConversation) staleQuestions = [...staleQuestions.filter(entry => entry.element?.isConnected), ...entries];
       // Invalidate only export preparation for the previous URL, including toolbar jobs.
       bridge('CK_STATUS'); downloads.reset(); saved = undefined; automaticReadUrl = '';
+      usingSavedOutline = false; outlineFingerprint = ''; refreshAt = 0; refreshRetries = 0;
       waitingForContent = Boolean(changedConversation && (contentUrl !== location.href || contentVersion <= observedContentVersion));
       lastUrl = location.href; dirty = true;
       entries = []; buttons = []; active = -1; list.replaceChildren();
@@ -98,8 +103,10 @@ export function mountFloating(bridge: (type: string) => unknown): void {
       dirty = false;
       staleQuestions = staleQuestions.filter(entry => entry.element?.isConnected);
       const pageQuestions = collectQuestions(document);
-      const current: OutlineEntry[] = pageQuestions.length || !saved || waitingForContent ? pageQuestions : savedQuestionOutline(saved, document);
-      const next = current.filter(entry => !staleQuestions.some(old => entry.element === old.element && entry.target === old.target && entry.text === old.text && entry.identity === old.identity));
+      const current: OutlineEntry[] = usingSavedOutline && saved && !waitingForContent ? savedQuestionOutline(saved, document) : pageQuestions;
+      // A confirmed saved path belongs to this URL, including history shared with the previous chat.
+      const next = usingSavedOutline && saved && !waitingForContent ? current :
+        current.filter(entry => !staleQuestions.some(old => entry.element === old.element && entry.target === old.target && entry.text === old.text && entry.identity === (old.domIdentity ?? old.identity)));
       const newQuestions = next.length > 0 && (staleQuestions.length > 0 || contentUrl === location.href);
       if (!waitingForContent || newQuestions || !current.length) {
         waitingForContent = false;
@@ -108,11 +115,21 @@ export function mountFloating(bridge: (type: string) => unknown): void {
         render(next);
       }
       count.textContent = `${entries.length} 个提问`; empty.hidden = entries.length > 0;
+      if (usingSavedOutline && saved && !waitingForContent) {
+        const fingerprint = outlinePageFingerprint(document);
+        if (fingerprint !== outlineFingerprint) {
+          outlineFingerprint = fingerprint; refreshAt = Date.now() + 800; refreshRetries = 1;
+        }
+      }
     }
     empty.querySelector('p')!.textContent = waitingForContent ? '正在加载当前会话的提问…' : '页面提问未识别，可读取保存的目录。';
     get('read-outline').hidden = waitingForContent;
     if (waitingForContent) { count.textContent = '0 个提问'; empty.hidden = false; }
     highlight(); place();
+    if (usingSavedOutline && saved && refreshAt && Date.now() >= refreshAt && !waitingForContent && !downloads.busy) {
+      const info = bridge('CK_INFO') as { ok: boolean; data?: { generating: boolean } };
+      if (info.ok && !info.data?.generating) { refreshAt = 0; downloads.start('outline'); }
+    }
     if (!entries.length && !waitingForContent && automaticReadUrl !== location.href) {
       try { conversationId(location.href); }
       catch { return; }
@@ -154,15 +171,15 @@ export function mountFloating(bridge: (type: string) => unknown): void {
   new MutationObserver(records => {
     if (!records.some(record => record.target !== host && !host.contains(record.target))) return;
     if (records.some(record => {
-      if (record.type === 'attributes' && !['data-message-author-role', 'data-message-id', 'data-testid', 'data-turn'].includes(record.attributeName || '')) return false;
+      if (record.type === 'attributes' && !['data-message-author-role', 'data-message-role', 'data-message-id', 'data-testid', 'data-turn'].includes(record.attributeName || '')) return false;
       const element = record.target instanceof Element ? record.target : record.target.parentElement;
-      const user = '[data-message-author-role="user"], [data-testid="user-message"], .user-message-bubble-color, [data-turn="user"]';
-      const questionChanged = (node: Node): boolean => node instanceof Element && Boolean(node.matches(user) || node.querySelector(user) || [...node.querySelectorAll('h5.sr-only, h6.sr-only')].some(heading => /^(you said|you|你说|您说|用户)\s*[:：]?$/i.test(heading.textContent?.trim() || '')));
+      const user = '[data-message-author-role="user"], [data-message-role="user"], [data-testid="user-message"], .user-message-bubble-color, [data-turn="user"]';
+      const questionChanged = (node: Node): boolean => node instanceof Element && Boolean(node.matches(user) || node.querySelector(user) || [...node.querySelectorAll('h2.sr-only, h3.sr-only, h4.sr-only, h5.sr-only, h6.sr-only')].some(heading => /^(you said|you|你说|您说|用户)\s*[:：]?$/i.test(heading.textContent?.trim() || '')));
       return Boolean(element?.closest('main, [role="main"]') && (element.closest(user) || [...record.addedNodes, ...record.removedNodes].some(questionChanged))) || [...record.addedNodes].some(node => node instanceof Element && Boolean(node.matches('main, [role="main"]') || node.querySelector('main, [role="main"]')));
     })) { contentUrl = location.href; contentVersion++; }
     dirty = true; clearTimeout(updateTimer); updateTimer = setTimeout(update, 120);
   }).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true,
-    attributeFilter: ['hidden', 'aria-hidden', 'style', 'class', 'data-turn', 'data-message-author-role', 'data-message-id', 'data-testid'] });
+    attributeFilter: ['hidden', 'aria-hidden', 'style', 'class', 'alt', 'data-turn', 'data-message-author-role', 'data-message-role', 'data-message-id', 'data-testid'] });
   setInterval(update, 1000);
   function preference(value: unknown): void { host.hidden = value === false; if (host.hidden) show(false); place(); }
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -175,7 +192,25 @@ export function mountFloating(bridge: (type: string) => unknown): void {
   }).catch(() => {});
   const downloads = mountFloatingDownload(root, bridge, data => {
     if (data.url !== location.href) return;
+    // Current-URL records can supply the directory before the page replaces its old nodes.
+    if (usingSavedOutline) waitingForContent = false;
+    if (readWasRefresh && beforeReadQuestions === questionVersion(data) && refreshRetries > 0 && !refreshAt) {
+      refreshRetries--; refreshAt = Date.now() + 1800;
+    }
     saved = data; dirty = true; update();
-  }, place);
+  }, place, {
+    started(purpose) {
+      readWasRefresh = purpose === 'outline' && usingSavedOutline && Boolean(saved);
+      beforeReadQuestions = questionVersion(saved);
+      if (purpose === 'outline' || waitingForContent) usingSavedOutline = true;
+      if (usingSavedOutline) { outlineFingerprint = outlinePageFingerprint(document); refreshAt = 0; }
+    },
+    failed(error) {
+      // A response starting during a read invalidates it; resume after generation, not on every token.
+      if (usingSavedOutline && saved && error instanceof Error && error.message.includes('回答还在生成')) {
+        refreshAt = Date.now() + 800; refreshRetries = 1;
+      } else { refreshAt = 0; refreshRetries = 0; }
+    },
+  });
   document.body.append(host); update();
 }

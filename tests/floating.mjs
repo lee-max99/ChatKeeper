@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 await mkdir('artifacts/downloads', { recursive: true });
 const context = await chromium.launchPersistentContext('', {
   channel: 'chromium', headless: true, acceptDownloads: true,
-  args: [`--disable-extensions-except=${resolve('dist')}`, `--load-extension=${resolve('dist')}`],
+  ignoreDefaultArgs: ['--disable-extensions'], args: ['--enable-unsafe-extension-debugging'],
 });
 const errors = []; const requests = []; const results = [];
 let delay = 0; let strict = false;
@@ -22,18 +22,21 @@ await context.route('https://chatgpt.com/**', async route => {
   }
   if (path.startsWith('/backend-api/conversation/')) {
     requests.push(path);
+    const responsePrompts = [...apiPrompts];
     if (delay) await new Promise(resolveWait => setTimeout(resolveWait, delay));
     const mapping = {};
-    apiPrompts.forEach((text, index) => {
+    responsePrompts.forEach((text, index) => {
       mapping[`u${index}`] = { id: `u${index}`, parent: index ? `a${index - 1}` : null, message: { id: `u${index}`, author: { role: 'user' }, content: { parts: [text] } } };
       mapping[`a${index}`] = { id: `a${index}`, parent: `u${index}`, message: { id: `a${index}`, author: { role: 'assistant' }, status: 'finished_successfully', content: { parts: [`回答 ${index}`] } } };
     });
     mapping.old = { id: 'old', parent: 'u0', message: { id: 'old', author: { role: 'assistant' }, content: { parts: ['不应进入目录的旧分支'] } } };
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ title: '保存记录', current_node: `a${apiPrompts.length - 1}`, mapping }) }).catch(() => {}); return;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ title: '保存记录', current_node: `a${responsePrompts.length - 1}`, mapping }) }).catch(() => {}); return;
   }
   await route.fulfill({ contentType: 'text/html', headers: strict ? { 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'" } : {}, body: `<!doctype html><meta charset="UTF-8"><title>整理聊天记录 - ChatGPT</title><style>body{margin:0;background:#f9fafb;color:#292931;font:15px/1.7 sans-serif}header{position:fixed;top:0;left:0;right:0;height:56px;background:white;border-bottom:1px solid #eee;padding:12px 28px;z-index:2}main{height:100vh;overflow:auto;max-width:760px;margin:0 auto;padding:85px 40px 300px;box-sizing:border-box}article{padding:20px 0}article:has([data-message-author-role=assistant]){min-height:300px}article:has([data-message-author-role=user]){scroll-margin-top:24px}[data-message-author-role=user]{padding:14px 20px;background:#eeeef4;border-radius:18px;width:80%;margin-left:auto}button{margin-left:10px}pre{background:#f0f0f3;padding:20px;border-radius:12px}</style><header>ChatGPT</header><aside hidden><div data-message-author-role="user">侧栏文字</div></aside><main>${turns}<article hidden><div data-message-author-role="user">旧分支不应出现</div></article></main>` });
 });
-const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+const extensionCdp = await context.browser().newBrowserCDPSession();
+await extensionCdp.send('Extensions.loadUnpacked', { path: resolve('dist') });
+let worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
 const page = context.pages()[0] || await context.newPage();
 const pageCdp = await context.newCDPSession(page); let contentContext;
 const extensionId = worker.url().split('/')[2];
@@ -248,10 +251,113 @@ try {
   assert.equal(await items.nth(1).evaluate(node => node.getRootNode().activeElement === node), true);
   results.push('Saved current-path records recover an unmarked page outline, locate duplicate plain prompts in order, and report unloaded history without jumping elsewhere.');
   await widget.screenshot({ path: 'artifacts/floating-fallback-detail.png' });
+  const beforeOutlineUpdate = requests.length;
+  apiPrompts.push('后来新增的问题');
+  await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<p id="plain-q4">后来新增的问题</p>'));
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 5, undefined, { timeout: 6000 });
+  assert.deepEqual(await items.locator('.question-text').allTextContents(), apiPrompts);
+  assert.ok(requests.length > beforeOutlineUpdate, 'Changed unmarked content must refresh saved records');
+  apiPrompts[0] = '编辑后的保存提问';
+  await page.evaluate(() => { document.querySelector('#plain-q1').textContent = '编辑后的保存提问'; });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('.question-text').textContent === '编辑后的保存提问', undefined, { timeout: 6000 });
+  await items.nth(1).focus();
+  await page.evaluate(() => document.querySelector('#plain-q1').setAttribute('data-message-role', 'user'));
+  await pause(400);
+  assert.deepEqual(await items.locator('.question-text').allTextContents(), apiPrompts, 'Recognizing only part of the page must not discard saved history');
+  assert.equal(await items.nth(1).evaluate(node => node.getRootNode().activeElement === node), true);
+  const stableRequests = requests.length;
+  await pause(4000);
+  assert.equal(requests.length, stableRequests, 'An unchanged fallback directory must not poll the service repeatedly');
+  results.push('Saved outline refreshes after new and edited unmarked prompts, retains history when only part of the page is recognized, and preserves focus without continuous API polling.');
+  await pageCdp.send('Runtime.evaluate', { contextId: contentContext, expression: "document.querySelector('#plain-q4').scrollIntoView = () => { document.documentElement.dataset.outlineJumped = 'yes'; }; document.documentElement.dataset.outlineJumped = 'no';" });
+  await page.evaluate(() => {
+    document.querySelector('#plain-q4').setAttribute('data-message-role', 'assistant');
+    document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button')[4].click();
+  });
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.outlineJumped), 'no', 'Changed assistant roles must immediately invalidate old question targets');
+  await pause(300);
+  await page.evaluate(() => {
+    document.querySelector('#plain-q4').setAttribute('data-message-role', 'user');
+    document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button')[4].click();
+  });
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.outlineJumped), 'yes');
+  results.push('Role marker changes refresh saved-directory targets without replacing its full history.');
+
+  const beforeStreaming = requests.length;
+  apiPrompts.push('生成结束后才更新的提问');
+  await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<button data-testid="stop-button">停止</button><p>生成结束后才更新的提问</p>'));
+  await pause(1800);
+  assert.equal(requests.length, beforeStreaming, 'Saved outline refresh must wait until generation ends');
+  await page.evaluate(() => document.querySelector('[data-testid="stop-button"]').remove());
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 6, undefined, { timeout: 6000 });
+  results.push('Saved outline waits during generation and refreshes once the response finishes.');
+
+  const backendReads = () => requests.filter(path => path.startsWith('/backend-api/conversation/')).length;
+  async function waitForBackendRead(previous) {
+    for (let attempt = 0; attempt < 120; attempt++) { if (backendReads() > previous) return; await pause(50); }
+    throw new Error('Expected saved-directory refresh did not start');
+  }
+  const beforeLaggedSave = backendReads();
+  await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<p>延迟保存的提问</p>'));
+  await waitForBackendRead(beforeLaggedSave);
+  apiPrompts.push('延迟保存的提问');
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 7, undefined, { timeout: 6000 });
+  assert.equal(backendReads() - beforeLaggedSave, 2, 'An unchanged saved snapshot permits one bounded follow-up read');
+  results.push('One bounded follow-up read recovers a question that reaches saved records after the initial refresh.');
+
+  delay = 700;
+  const beforeInFlightChange = backendReads();
+  apiPrompts.push('读取开始前的新提问');
+  await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<p>读取开始前的新提问</p>'));
+  await waitForBackendRead(beforeInFlightChange);
+  apiPrompts.push('读取过程中的新提问');
+  await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<p>读取过程中的新提问</p>'));
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 9, undefined, { timeout: 7000 });
+  assert.deepEqual(await items.locator('.question-text').allTextContents(), apiPrompts);
+  delay = 0;
+  results.push('Changes arriving while saved records are being read remain queued and update the complete directory afterward.');
+  delay = 700;
+  const beforeGenerationRace = backendReads();
+  apiPrompts.push('生成开始前的问题');
+  await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<p>生成开始前的问题</p>'));
+  await waitForBackendRead(beforeGenerationRace);
+  apiPrompts.push('读取期间生成的新问题');
+  await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<button data-testid="stop-button">停止</button><p>读取期间生成的新问题</p>'));
+  await pause(1100);
+  await page.evaluate(() => document.querySelector('[data-testid="stop-button"]').remove());
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 11, undefined, { timeout: 6000 });
+  delay = 0;
+  results.push('Generation starting during a read defers the rejected refresh and resumes it after generation ends without losing new questions.');
+  delay = 1000;
+  const beforeJoin = backendReads();
+  await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<p>回答内容更新</p>'));
+  await waitForBackendRead(beforeJoin);
+  assert.equal(await widget.locator('#download').isEnabled(), true, 'Automatic directory reading must allow joining it to download');
+  const joinedMarkdown = await download('md');
+  assert.match(joinedMarkdown, /读取过程中的新提问/);
+  assert.equal(backendReads() - beforeJoin, 1, 'Download joins the active read rather than preparing the records a second time');
+  delay = 0;
+  results.push('Download can join an automatic outline refresh and saves the complete path without a second preparation.');
   const markdown = await download('md');
-  assert.match(markdown, /页面中的问题/); assert.match(markdown, /尚未加载的历史问题/); assert.doesNotMatch(markdown, /不应进入目录的旧分支/);
+  assert.match(markdown, /编辑后的保存提问/); assert.match(markdown, /后来新增的问题/); assert.match(markdown, /尚未加载的历史问题/); assert.doesNotMatch(markdown, /不应进入目录的旧分支/);
   const html = await download('html'); assert.match(html, /尚未加载的历史问题/); assert.match(html, /<!doctype html>/i);
   results.push('Floating Markdown and HTML downloads include the complete current path even when the directory could not parse any messages.');
+  apiPrompts.push('新会话的追加提问');
+  await page.evaluate(() => {
+    history.pushState({}, '', '/c/shared-history'); document.title = '共同历史的新会话 - ChatGPT';
+  });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#title').textContent === '共同历史的新会话');
+  assert.equal(await items.count(), 0, 'Old recognized user nodes must remain hidden while the new conversation loads');
+  const sharedHistoryMarkdown = await download('md');
+  assert.match(sharedHistoryMarkdown, /新会话的追加提问/);
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 12, undefined, { timeout: 6000 });
+  assert.deepEqual(await items.locator('.question-text').allTextContents(), apiPrompts, 'API-confirmed history shared with the previous page must stay in the new directory');
+  results.push('A new conversation retaining common historical questions displays its entire confirmed saved path without dropping shared entries.');
+  apiPrompts = ['切换回答后保留的问题', '新的后续问题'];
+  await page.evaluate(() => { document.querySelector('main').innerHTML = '<p>切换回答后保留的问题</p><p>新的后续问题</p>'; });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 2, undefined, { timeout: 6000 });
+  assert.deepEqual(await items.locator('.question-text').allTextContents(), apiPrompts);
+  results.push('A refreshed saved path replaces obsolete questions after editing or changing the current branch instead of accumulating old paths.');
   delay = 1200;
   await widget.locator('#download').click(); await widget.locator('#download-cancel').waitFor({ state: 'visible' }); await widget.locator('#download-cancel').click();
   await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#download-status').textContent.includes('取消') && document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#download-cancel').hidden);
@@ -262,6 +368,21 @@ try {
   await pause(1400);
   assert.equal(await worker.evaluate(async () => (await chrome.downloads.search({})).length), beforeNavigation);
   results.push('Floating download remains cancellable and navigating before preparation finishes does not download the previous conversation.');
+  delay = 0;
+  const beforeInvalidatedDownload = await worker.evaluate(async () => (await chrome.downloads.search({})).length);
+  const replacementWorker = context.waitForEvent('serviceworker');
+  // Replace only this isolated profile's test extension, leaving its existing chat tab open.
+  await extensionCdp.send('Extensions.uninstall', { id: extensionId });
+  await extensionCdp.send('Extensions.loadUnpacked', { path: resolve('dist') });
+  worker = await replacementWorker;
+  await widget.locator('#download').click();
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#download-status').textContent.includes('扩展连接已失效'), undefined, { timeout: 6000 });
+  assert.match(await widget.locator('#download-status').textContent(), /刷新 ChatGPT 页面/);
+  assert.equal(await worker.evaluate(async () => (await chrome.downloads.search({})).length), beforeInvalidatedDownload);
+  await page.reload(); await widget.locator('#launcher').waitFor({ state: 'visible' }); await widget.locator('#launcher').click();
+  const recoveredMarkdown = await download('md');
+  assert.match(recoveredMarkdown, /切换回答后保留的问题/);
+  results.push('Replacing the extension invalidates the old page context, shows a Chinese recovery hint without downloading a partial file, and refreshing ChatGPT restores actual download.');
   assert.deepEqual(errors, []);
   await writeFile('artifacts/floating-report.json', JSON.stringify({ status: 'passed', fixtureOnly: true, results, errors }, null, 2));
   console.log(results.join('\n'));

@@ -2,7 +2,7 @@ import { visible } from './collector';
 import { markdownToHtml } from './markdown-renderer';
 import type { Conversation } from './types';
 
-export type OutlineEntry = { element: HTMLElement | null; target: HTMLElement | null; text: string; identity: string };
+export type OutlineEntry = { element: HTMLElement | null; target: HTMLElement | null; text: string; identity: string; domIdentity?: string };
 export type QuestionEntry = OutlineEntry & { element: HTMLElement; target: HTMLElement };
 const USER = '[data-message-author-role="user"]';
 const ASSISTANT = '[data-message-author-role="assistant"], [data-message-role="assistant"], [data-turn="assistant"]';
@@ -56,6 +56,31 @@ const normalized = (text: string) => text.replace(/\s+/g, ' ').trim();
 type SavedQuestion = { text: string; identity: string; aliases: Set<string>; raw: string };
 const preparedQuestions = new WeakMap<Conversation, { questions: SavedQuestion[]; answerTexts: Set<string> }>();
 
+export function outlinePageFingerprint(doc: Document): string {
+  const parts: string[] = []; const visibility = new WeakMap<Element, boolean>();
+  const included = (element: Element) => {
+    if (element.closest('nav, aside, form, footer, button, textarea, [contenteditable="true"], script, style, #chatkeeper-widget')) return false;
+    if (!visibility.has(element)) visibility.set(element, visible(element));
+    return visibility.get(element)!;
+  };
+  for (const scope of doc.querySelectorAll<HTMLElement>('main, [role="main"]')) {
+    if (!included(scope) || scope.parentElement?.closest('main, [role="main"]')) continue;
+    const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const parent = walker.currentNode.parentElement;
+      const text = normalized(walker.currentNode.textContent || '');
+      if (text && parent && included(parent)) parts.push(text);
+    }
+    scope.querySelectorAll('img').forEach(element => {
+      if (included(element)) parts.push(`attachment:${element.alt || '图片'}`);
+    });
+    scope.querySelectorAll('[data-message-id]').forEach(element => {
+      if (included(element)) parts.push(`id:${element.getAttribute('data-message-id')}`);
+    });
+  }
+  return JSON.stringify(parts);
+}
+
 export function savedQuestionOutline(data: Conversation, doc: Document): OutlineEntry[] {
   let prepared = preparedQuestions.get(data);
   if (!prepared) {
@@ -103,6 +128,8 @@ export function savedQuestionOutline(data: Conversation, doc: Document): Outline
   const bind = (index: number, element: HTMLElement) => {
     const target = targetOf(element);
     outline[index].element = element; outline[index].target = target; used.push(target);
+    const marker = element.closest('[data-message-id]') || element.querySelector('[data-message-id]') || target.querySelector('[data-message-id]');
+    outline[index].domIdentity = marker?.getAttribute('data-message-id') || '';
   };
   // Reserve identified messages first, so an earlier repeated text cannot steal their targets.
   saved.forEach((entry, index) => {
@@ -130,7 +157,7 @@ export function savedQuestionOutline(data: Conversation, doc: Document): Outline
 }
 
 export function jumpToQuestion(entry: OutlineEntry): boolean {
-  if (!entry.target?.isConnected || !visible(entry.target)) return false;
+  if (!entry.target?.isConnected || !visible(entry.target) || entry.element?.closest(ASSISTANT) || entry.target.closest(ASSISTANT)) return false;
   const oldMargin = entry.target.style.scrollMarginTop;
   entry.target.style.scrollMarginTop = '80px';
   try {
