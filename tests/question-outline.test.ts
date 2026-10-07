@@ -3,6 +3,46 @@ import { collectQuestions, jumpToQuestion, outlinePageFingerprint, savedQuestion
 
 afterEach(() => { document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+it.each([
+  '<div data-message-author-role="user">第一行<br>第二行</div>',
+  '<div data-message-author-role="user"><h5 class="sr-only">You said:</h5><div>第一行</div><div>第二行</div><button>编辑</button></div>',
+])('locates already loaded multiline prompts using cleaned user text when saved records supply the outline (%s)', html => {
+  document.body.innerHTML = `<main><article data-testid="conversation-turn-0">${html}</article></main>`;
+  const data = { title: '', url: '', exportedAt: '', warnings: [], messages: [{ id: 'u', stable: true, role: 'user' as const, html: '', markdown: '第一行\n第二行' }] };
+  expect(collectQuestions(document)[0].text).toBe('第一行 第二行');
+  expect(savedQuestionOutline(data, document)[0].target).toBe(document.querySelector('article'));
+});
+
+it('retains exact DOM text matching for adjacent inline formatting without inserting artificial spaces', () => {
+  document.body.innerHTML = '<main><div data-message-author-role="user"><strong>项目</strong>名称</div></main>';
+  const data = { title: '', url: '', exportedAt: '', warnings: [], messages: [{ id: 'u', stable: true, role: 'user' as const, html: '', markdown: '**项目**名称' }] };
+  expect(savedQuestionOutline(data, document)[0].target).not.toBeNull();
+});
+
+it.each([false, true])('does not let cleaned text steal a different saved question with an exact raw match (reversed=%s)', reversed => {
+  document.body.innerHTML = '<main><div data-message-author-role="user"><strong>项目</strong>名称</div></main>';
+  const messages = [
+    { id: 'space', stable: true, role: 'user' as const, html: '', markdown: '项目 名称' },
+    { id: 'inline', stable: true, role: 'user' as const, html: '', markdown: '**项目**名称' },
+  ];
+  if (reversed) messages.reverse();
+  const outline = savedQuestionOutline({ title: '', url: '', exportedAt: '', warnings: [], messages }, document);
+  expect(outline.find(entry => entry.identity === 'space')!.target).toBeNull();
+  expect(outline.find(entry => entry.identity === 'inline')!.target).toBe(document.querySelector('[data-message-author-role=user]'));
+});
+
+it.each([false, true])('keeps inline prompt identity when edit controls and hidden headings obscure its raw text (reversed=%s)', reversed => {
+  document.body.innerHTML = '<main><div data-message-author-role="user"><h5 class="sr-only">You said:</h5><strong>项目</strong>名称<button>编辑</button></div></main>';
+  const messages = [
+    { id: 'space', stable: true, role: 'user' as const, html: '', markdown: '项目 名称' },
+    { id: 'inline', stable: true, role: 'user' as const, html: '', markdown: '**项目**名称' },
+  ];
+  if (reversed) messages.reverse();
+  const outline = savedQuestionOutline({ title: '', url: '', exportedAt: '', warnings: [], messages }, document);
+  expect(outline.find(entry => entry.identity === 'space')!.target).toBeNull();
+  expect(outline.find(entry => entry.identity === 'inline')!.target).toBe(document.querySelector('[data-message-author-role=user]'));
+});
+
 it('lists current questions in order, retaining repeated prompts while excluding answers, hidden branches and navigation', () => {
   document.body.innerHTML = `<aside><div data-message-author-role="user">侧栏文字</div></aside><main>
     <article data-testid="conversation-turn-0"><div data-message-author-role="user"><h5 class="sr-only">You said:</h5><div>问题 一<button>编辑</button><span hidden>隐藏文字</span></div><div data-message-author-role="user">补充</div></div></article>

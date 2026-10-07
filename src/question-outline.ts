@@ -9,7 +9,7 @@ const ASSISTANT = '[data-message-author-role="assistant"], [data-message-role="a
 const TURN = '[data-testid^="conversation-turn-"], [data-turn]';
 const USER_CONTENT = `${USER}, [data-testid="user-message"], .user-message-bubble-color, [data-message-role="user"]`;
 
-function questionText(element: HTMLElement): string {
+function questionText(element: HTMLElement, separator = ' '): string {
   const clone = element.cloneNode(true) as HTMLElement;
   const originals = [...element.querySelectorAll('*')]; const copies = [...clone.querySelectorAll('*')];
   originals.forEach((node, index) => {
@@ -24,7 +24,7 @@ function questionText(element: HTMLElement): string {
   clone.querySelectorAll('img').forEach(node => node.replaceWith(element.ownerDocument.createTextNode(node.alt || '图片')));
   const walker = element.ownerDocument.createTreeWalker(clone, NodeFilter.SHOW_TEXT); const parts: string[] = [];
   while (walker.nextNode()) parts.push(walker.currentNode.textContent || '');
-  return parts.join(' ').replace(/\s+/g, ' ').trim();
+  return parts.join(separator).replace(/\s+/g, ' ').trim();
 }
 
 export function collectQuestions(doc: Document): QuestionEntry[] {
@@ -106,6 +106,8 @@ export function savedQuestionOutline(data: Conversation, doc: Document): Outline
   const desired = new Set(saved.flatMap(entry => [entry.text, entry.raw]));
   const scopes = [...doc.querySelectorAll<HTMLElement>('main, [role="main"]')].filter(visible);
   const knownQuestions = collectQuestions(doc);
+  const knownTexts = new Map(knownQuestions.map(entry => [entry.element, entry.text]));
+  const knownRawTexts = new Map(knownQuestions.map(entry => [entry.element, questionText(entry.element, '')]));
   const candidates = new Set<HTMLElement>(knownQuestions.map(entry => entry.element));
   for (const scope of scopes) {
     scope.querySelectorAll<HTMLElement>('[data-message-id]').forEach(element => candidates.add(element));
@@ -148,7 +150,10 @@ export function savedQuestionOutline(data: Conversation, doc: Document): Outline
       const text = normalized(element.textContent || '');
       const knownUser = knownQuestions.some(question => question.element.contains(element));
       // Unmarked text also appearing in an answer could be a quoted paragraph, not a loaded prompt.
-      if (texts.has(text) && (knownUser || !answerTexts.some(answer => answer.includes(text))) && !matches.some(match => overlaps(targetOf(match), targetOf(element)))) matches.push(element);
+      // Remove controls before reserving exact inline text, so inserted layout spaces cannot steal its match.
+      const rawText = knownRawTexts.get(element) || text;
+      const matchesText = texts.has(text) || texts.has(rawText) || (!desired.has(text) && !desired.has(rawText) && texts.has(knownTexts.get(element) || ''));
+      if (matchesText && (knownUser || !answerTexts.some(answer => answer.includes(text))) && !matches.some(match => overlaps(targetOf(match), targetOf(element)))) matches.push(element);
     }
     // Partial loading makes identical prompts ambiguous. Keep the directory but defer jumping.
     if (matches.length === indices.length) indices.forEach((index, offset) => bind(index, matches[offset]));

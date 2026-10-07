@@ -244,7 +244,7 @@ try {
   await items.nth(2).click();
   await page.waitForFunction(() => { const top = document.querySelector('#plain-q3').getBoundingClientRect().top; return top >= 70 && top < 100; });
   await items.nth(3).click();
-  assert.match(await widget.locator('#download-status').textContent(), /尚未加载/);
+  assert.match(await widget.locator('#download-status').textContent(), /无法定位/);
   await items.nth(1).focus();
   await page.evaluate(() => document.querySelector('#plain-q3').insertAdjacentHTML('afterend', '<div>页面状态更新</div>'));
   await pause(250);
@@ -328,7 +328,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 11, undefined, { timeout: 6000 });
   delay = 0;
   results.push('Generation starting during a read defers the rejected refresh and resumes it after generation ends without losing new questions.');
-  delay = 1000;
+  delay = 3000;
   const beforeJoin = backendReads();
   await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<p>回答内容更新</p>'));
   await waitForBackendRead(beforeJoin);
@@ -421,6 +421,23 @@ try {
   const storedAfterSelection = await worker.evaluate(() => chrome.storage.local.get(null));
   assert.ok(Object.keys(storedAfterSelection).every(key => ['floatingEnabled', 'floatingPosition', 'floatingFormat'].includes(key)));
   results.push('Q&A selection loads complete saved history, exports only noncontiguous groups in Markdown/HTML, separates duplicate prompts, supports all/clear, and resets on exit/navigation without persisting selections.');
+  apiPrompts = ['第一行\n第二行', '仍未加载的历史提问'];
+  await page.evaluate(() => {
+    document.querySelector('main').innerHTML = '<div style="height:1200px">前面的内容</div><article id="loaded-multiline" data-testid="conversation-turn-0"><div data-message-author-role="user"><h5 class="sr-only" hidden>You said:</h5>第一行<br>第二行<button>编辑</button></div></article><div style="height:900px">后面的内容</div>';
+    document.querySelector('main').scrollTop = 0;
+  });
+  await widget.locator('#select-mode').click();
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#chatkeeper-widget').shadowRoot;
+    return root.querySelectorAll('#questions input').length === 2 && root.querySelector('.question-text')?.textContent === '第一行 第二行';
+  }, undefined, { timeout: 6000 });
+  await widget.locator('#select-mode').click(); await items.first().click();
+  await page.waitForFunction(() => { const top = document.querySelector('#loaded-multiline').getBoundingClientRect().top; return top >= 70 && top < 100; });
+  assert.doesNotMatch(await widget.locator('#download-status').textContent(), /无法定位/);
+  await items.nth(1).click();
+  assert.match(await widget.locator('#download-status').textContent(), /无法定位.*下载不受影响/);
+  const despiteUnloaded = await download('md'); assert.match(despiteUnloaded, /仍未加载的历史提问/);
+  results.push('Loaded multiline prompts with br/controls navigate from the saved outline; genuinely absent history has an accurate navigation hint and still downloads completely.');
   assert.deepEqual(errors, []);
   await writeFile('artifacts/floating-report.json', JSON.stringify({ status: 'passed', fixtureOnly: true, results, errors }, null, 2));
   console.log(results.join('\n'));

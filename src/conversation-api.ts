@@ -114,7 +114,9 @@ export function normalizeConversation(raw: unknown, url: string, visibleIds: str
     const message = record(node.message);
     if (!exportable(message)) continue;
     const role = record(message.author)!.role as ChatMessage['role'];
-    if (['in_progress', 'pending', 'streaming'].includes(String(message.status))) throw new Error('回答还在生成，请结束后重试。');
+    if (['in_progress', 'pending', 'streaming'].includes(String(message.status))) {
+      warnings.add('保存记录中仍有未完成标记，已导出当前保存的内容；部分回答可能尚未完整保存。');
+    }
     if (typeof message.id !== 'string') throw new Error('消息标识不完整，未生成文件。');
     messages.push({ id: message.id, stable: true, role, html: '', markdown: messageText(message, warnings) });
   }

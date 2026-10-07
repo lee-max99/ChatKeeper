@@ -290,6 +290,16 @@ try {
   await popup.close(); responseStatus = 200;
   report.push('Upstream API failures never fall back to scrolling or a misleading DOM-only export.');
 
+  payload = shortConversation(); payload.mapping['assistant-1'].message.status = 'in_progress'; payload.mapping['assistant-2'].message.status = 'pending';
+  popup = await openPopup();
+  assert.equal(await popup.locator('#export').isDisabled(), false);
+  const staleStatusMarkdown = await download(popup, 'md');
+  assert.match(staleStatusMarkdown.content, /未完成标记/); assert.match(staleStatusMarkdown.content, /每周回顾一次/);
+  const staleStatusHtml = await download(popup, 'html');
+  assert.match(staleStatusHtml.content, /未完成标记/); assert.match(staleStatusHtml.content, /每周回顾一次/);
+  await popup.close();
+  report.push('A finished page with stale API in-progress/pending markers downloads all saved content in Markdown and HTML with an explicit saved-status notice.');
+
   await source.evaluate(() => { const button = document.createElement('button'); button.dataset.testid = 'stop-button'; document.body.append(button); });
   popup = await openPopup();
   assert.equal(await popup.locator('#export').isDisabled(), true);

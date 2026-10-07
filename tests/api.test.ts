@@ -205,9 +205,22 @@ it('omits hidden system, tool and analysis messages without exposing them', () =
   } };
   expect(normalizeConversation(raw, url).messages.map(m => m.markdown)).toEqual(['问题', '最终回答']);
 });
-it('refuses streaming API messages and keeps non-text attachments visible', () => {
-  const streaming = data(); streaming.mapping.a2.message.status = 'in_progress';
-  expect(() => normalizeConversation(streaming, url)).toThrow(/生成/);
+it.each(['in_progress', 'pending', 'streaming'])('exports saved contents with a notice instead of blocking on a stale API status (%s)', status => {
+  const stale = data(); stale.mapping.a2.message.status = status; stale.mapping.a1.message.status = status;
+  const result = normalizeConversation(stale, url);
+  expect(result.messages.map(message => message.id)).toEqual(['u1', 'a1', 'u2', 'a2']);
+  expect(result.messages.at(-1)?.markdown).toBe('**新回答**');
+  expect(result.warnings.filter(warning => warning.includes('未完成标记'))).toHaveLength(1);
+  expect(renderMarkdown(result)).toContain('未完成标记');
+  expect(renderHtml(result)).toContain('未完成标记');
+  expect(() => validatePage(result, { title: '', url, visibleIds: [], generating: true })).toThrow(/生成/);
+});
+it('does not let an old pending user message block subsequent completed replies', () => {
+  const stale = data(); stale.mapping.u1.message.status = 'pending';
+  const result = normalizeConversation(stale, url);
+  expect(result.messages).toHaveLength(4); expect(result.warnings.join('')).toContain('未完成标记');
+});
+it('keeps non-text attachments visible', () => {
   const raw = { title: '附件', current_node: 'u', mapping: { u: node('u', null, 'user', '', {
     content: { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer', asset_pointer: 'file-service://file-1' }] },
     metadata: { attachments: [{ name: 'notes.pdf' }] },

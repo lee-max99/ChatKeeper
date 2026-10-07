@@ -1,6 +1,6 @@
 # ChatKeeper 隐私说明
 
-更新日期：2026-10-04。适用于 v0.6.0。
+更新日期：2026-10-07。适用于 v0.6.2。
 
 ChatKeeper 提供当前页面的提问目录，并将用户主动选择的当前 ChatGPT 对话导出为 Markdown 或离线 HTML。无需 OpenAI API Key。
 

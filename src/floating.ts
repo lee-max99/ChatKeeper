@@ -71,7 +71,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
         if (selection?.active) { selection.toggle(entry.identity); return; }
         const latest = usingSavedOutline && saved ? savedQuestionOutline(saved, document).find(item => item.identity === entry.identity) :
           collectQuestions(document).find(item => item.element === entry.element && item.target === entry.target);
-        if (!latest || !jumpToQuestion(latest)) downloads.message('该提问尚未加载，请在聊天页加载后重试。');
+        if (!latest || !jumpToQuestion(latest)) downloads.message('暂时无法定位该提问，请在聊天页加载后重试。下载不受影响。');
       });
       if (selecting && selection) item.append(selection.checkbox(entry, index));
       item.append(button); fragment.append(item); buttons.push(button);
