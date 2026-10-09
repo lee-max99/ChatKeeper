@@ -1,4 +1,5 @@
 import { renderHtml, renderMarkdown, safeFilename } from './exporters';
+import { saveDownload } from './download-client';
 import type { Conversation, ExportJob, PageInfo } from './types';
 
 function errorText(error: unknown, fallback: string): string {
@@ -48,11 +49,11 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
       request('CK_CHECK');
       if (token !== run || location.href !== url) return;
       cancel.hidden = true;
-      const result = await chrome.runtime.sendMessage({ type: 'DOWNLOAD', format: selected,
-        filename: safeFilename(`${data.title}_${new Date().toLocaleDateString('sv-SE')}`, selected), content });
+      button.textContent = '等待保存…';
+      const result = await saveDownload({ type: 'DOWNLOAD', format: selected,
+        filename: safeFilename(`${data.title}_${new Date().toLocaleDateString('sv-SE')}`, selected), content }, message, () => token === run && location.href === url);
       if (token !== run || location.href !== url) return;
-      if (!result?.ok) throw new Error(result?.error || '下载未开始，请重试。');
-      setBusy(false); message('下载已开始');
+      setBusy(false); message(result);
     } catch (error) {
       if (token !== run || location.href !== url) return;
       setBusy(false); lifecycle.failed?.(error); message(errorText(error, '导出失败，请重试。'), true);

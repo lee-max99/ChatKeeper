@@ -127,7 +127,10 @@ async function download(popup, format) {
       const item = (await chrome.downloads.search({})).find(item => !ids.includes(item.id));
       return item ? { state: item.state, filename: item.filename, error: item.error } : null;
     }, previousIds);
-    if (item?.state === 'complete') return { path: item.filename, content: await readFile(item.filename, 'utf8') };
+    if (item?.state === 'complete') {
+      await popup.waitForFunction(() => document.querySelector('#status').textContent.startsWith('已保存：') && !document.querySelector('#export').disabled);
+      return { path: item.filename, content: await readFile(item.filename, 'utf8') };
+    }
     if (item?.state === 'interrupted') throw new Error(`Download interrupted: ${item.error}`);
     await new Promise(resolveWait => setTimeout(resolveWait, 100));
   }
@@ -299,6 +302,15 @@ try {
   assert.match(staleStatusHtml.content, /未完成标记/); assert.match(staleStatusHtml.content, /每周回顾一次/);
   await popup.close();
   report.push('A finished page with stale API in-progress/pending markers downloads all saved content in Markdown and HTML with an explicit saved-status notice.');
+
+  await browserCdp.send('Browser.setDownloadBehavior', { behavior: 'deny' });
+  popup = await openPopup(); await popup.locator('#export').click();
+  await popup.waitForFunction(() => document.querySelector('#status').textContent.includes('文件未保存') && !document.querySelector('#export').disabled);
+  assert.doesNotMatch(await popup.locator('#status').textContent(), /已保存：|下载已开始/);
+  await browserCdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: resolve('artifacts/downloads'), eventsEnabled: true });
+  const retriedSave = await download(popup, 'md'); assert.match(retriedSave.content, /每周回顾一次/);
+  await popup.close();
+  report.push('A browser-denied save that returns a download ID is reported as unsaved in the popup, and a manual retry confirms an actual completed file.');
 
   await source.evaluate(() => { const button = document.createElement('button'); button.dataset.testid = 'stop-button'; document.body.append(button); });
   popup = await openPopup();

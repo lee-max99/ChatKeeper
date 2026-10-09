@@ -75,7 +75,10 @@ async function download(format) {
   await page.locator('#chatkeeper-widget #download').click();
   for (let attempt = 0; attempt < 125; attempt++) {
     const item = await worker.evaluate(async ids => (await chrome.downloads.search({})).find(item => !ids.includes(item.id)), before);
-    if (item?.state === 'complete') return readFile(item.filename, 'utf8');
+    if (item?.state === 'complete') {
+      await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#download-status').textContent.startsWith('已保存：'));
+      return readFile(item.filename, 'utf8');
+    }
     await pause(80);
   }
   throw new Error(`No floating download: ${await page.locator('#chatkeeper-widget #download-status').textContent()}`);
@@ -438,6 +441,13 @@ try {
   assert.match(await widget.locator('#download-status').textContent(), /无法定位.*下载不受影响/);
   const despiteUnloaded = await download('md'); assert.match(despiteUnloaded, /仍未加载的历史提问/);
   results.push('Loaded multiline prompts with br/controls navigate from the saved outline; genuinely absent history has an accurate navigation hint and still downloads completely.');
+  await browserCdp.send('Browser.setDownloadBehavior', { behavior: 'deny' });
+  await widget.locator('#download').click();
+  await page.waitForFunction(() => { const root = document.querySelector('#chatkeeper-widget').shadowRoot; return root.querySelector('#download-status').textContent.includes('文件未保存') && !root.querySelector('#download').disabled; });
+  assert.doesNotMatch(await widget.locator('#download-status').textContent(), /已保存：|下载已开始/);
+  await browserCdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: resolve('artifacts/downloads'), eventsEnabled: true });
+  const savedAfterFailure = await download('html'); assert.match(savedAfterFailure, /仍未加载的历史提问/);
+  results.push('Floating download reports a real browser-denied save as unsaved despite its download ID, then confirms a successful HTML file on manual retry.');
   assert.deepEqual(errors, []);
   await writeFile('artifacts/floating-report.json', JSON.stringify({ status: 'passed', fixtureOnly: true, results, errors }, null, 2));
   console.log(results.join('\n'));

@@ -1,6 +1,43 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
 afterEach(() => { vi.unstubAllGlobals(); });
+
+it.each([
+  { state: 'interrupted', error: 'USER_CANCELED', expected: /取消|阻止/ },
+  { state: 'interrupted', error: 'FILE_NO_SPACE', expected: /空间/ },
+  { state: 'complete', exists: false, expected: /移除/ },
+])('reports the actual browser failure after a download ID was returned: $error', async item => {
+  vi.resetModules(); let listener: any;
+  vi.stubGlobal('chrome', {
+    runtime: { id: 'keeper', getURL: (path: string) => `chrome-extension://keeper/${path}`, onMessage: { addListener: (fn: any) => { listener = fn; } } },
+    downloads: { download: async () => 7, search: async () => [{ id: 7, byExtensionId: 'keeper', ...item }] },
+  });
+  await import('../src/background');
+  const response = await new Promise<any>(resolve => { if (!listener({ type: 'DOWNLOAD_STATUS', id: 7 }, { id: 'keeper', url: 'chrome-extension://keeper/popup.html' }, resolve)) resolve(undefined); });
+  expect(response?.ok).toBe(false); expect(response?.error).toMatch(item.expected);
+});
+
+it('does not acknowledge success if the browser returns no download ID', async () => {
+  vi.resetModules(); let listener: any;
+  vi.stubGlobal('chrome', {
+    runtime: { id: 'keeper', getURL: (path: string) => `chrome-extension://keeper/${path}`, onMessage: { addListener: (fn: any) => { listener = fn; } } },
+    downloads: { download: async () => undefined },
+  });
+  await import('../src/background');
+  const response = await new Promise<any>(resolve => listener({ type: 'DOWNLOAD', content: '记录', format: 'md', filename: '会话.md' }, { id: 'keeper', url: 'chrome-extension://keeper/popup.html' }, resolve));
+  expect(response.ok).toBe(false); expect(response.error).toMatch(/未创建/);
+});
+
+it('does not expose download records owned by another extension', async () => {
+  vi.resetModules(); let listener: any;
+  vi.stubGlobal('chrome', {
+    runtime: { id: 'keeper', getURL: (path: string) => `chrome-extension://keeper/${path}`, onMessage: { addListener: (fn: any) => { listener = fn; } } },
+    downloads: { search: async () => [{ id: 7, byExtensionId: 'another', filename: 'private-file.txt', state: 'complete' }] },
+  });
+  await import('../src/background');
+  const response = await new Promise<any>(resolve => { if (!listener({ type: 'DOWNLOAD_STATUS', id: 7 }, { id: 'keeper', url: 'chrome-extension://keeper/popup.html' }, resolve)) resolve(undefined); });
+  expect(response?.ok).toBe(false); expect(JSON.stringify(response)).not.toContain('private-file');
+});
 it('accepts the floating page export and rejects other sites, frames and extensions', async () => {
   vi.resetModules();
   let listener: any;

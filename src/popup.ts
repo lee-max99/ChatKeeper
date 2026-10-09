@@ -1,6 +1,7 @@
 import './popup.css';
 import { assertChatGPT } from './collector';
 import { renderHtml, renderMarkdown, safeFilename } from './exporters';
+import { saveDownload } from './download-client';
 import type { ExportJob, PageInfo } from './types';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -53,11 +54,11 @@ async function poll(): Promise<void> {
     const content = selected === 'md' ? renderMarkdown(data) : renderHtml(data);
     // Recheck after conversion as a long document may take time to format.
     await request('CK_CHECK');
-    const result = await chrome.runtime.sendMessage({ type: 'DOWNLOAD', format: selected,
+    save.textContent = '等待保存…';
+    const result = await saveDownload({ type: 'DOWNLOAD', format: selected,
       filename: safeFilename(`${data.title}_${new Date().toLocaleDateString('sv-SE')}`, selected), content,
-    });
-    if (!result?.ok) throw new Error(result?.error || '下载未开始，请重试。');
-    setBusy(false); setStatus('已交给浏览器下载。');
+    }, setStatus);
+    setBusy(false); setStatus(result);
   } catch (error) { fail(error); }
 }
 async function startExport(): Promise<void> {
