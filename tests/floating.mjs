@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 await mkdir('artifacts/downloads', { recursive: true });
 const context = await chromium.launchPersistentContext('', {
   channel: 'chromium', headless: true, acceptDownloads: true,
+  ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
   ignoreDefaultArgs: ['--disable-extensions'], args: ['--enable-unsafe-extension-debugging'],
 });
 const errors = []; const requests = []; const results = [];
@@ -247,6 +248,7 @@ try {
   await items.nth(2).click();
   await page.waitForFunction(() => { const top = document.querySelector('#plain-q3').getBoundingClientRect().top; return top >= 70 && top < 100; });
   await items.nth(3).click();
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#download-status').textContent.includes('无法定位'));
   assert.match(await widget.locator('#download-status').textContent(), /无法定位/);
   await items.nth(1).focus();
   await page.evaluate(() => document.querySelector('#plain-q3').insertAdjacentHTML('afterend', '<div>页面状态更新</div>'));
@@ -438,6 +440,7 @@ try {
   await page.waitForFunction(() => { const top = document.querySelector('#loaded-multiline').getBoundingClientRect().top; return top >= 70 && top < 100; });
   assert.doesNotMatch(await widget.locator('#download-status').textContent(), /无法定位/);
   await items.nth(1).click();
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#download-status').textContent.includes('无法定位'));
   assert.match(await widget.locator('#download-status').textContent(), /无法定位.*下载不受影响/);
   const despiteUnloaded = await download('md'); assert.match(despiteUnloaded, /仍未加载的历史提问/);
   results.push('Loaded multiline prompts with br/controls navigate from the saved outline; genuinely absent history has an accurate navigation hint and still downloads completely.');
@@ -448,6 +451,31 @@ try {
   await browserCdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: resolve('artifacts/downloads'), eventsEnabled: true });
   const savedAfterFailure = await download('html'); assert.match(savedAfterFailure, /仍未加载的历史提问/);
   results.push('Floating download reports a real browser-denied save as unsaved despite its download ID, then confirms a successful HTML file on manual retry.');
+  // Simulate ChatGPT mounting a historical turn only after its scroll container moves.
+  apiPrompts = ['自动加载的历史提问', '当前末尾提问'];
+  await page.evaluate(() => {
+    history.pushState({}, '', '/c/autoload-navigation');
+    const main = document.querySelector('main');
+    main.innerHTML = '<div style="height:2400px"></div><article data-testid="conversation-turn-2"><div data-message-author-role="user" data-message-id="u1">当前末尾提问</div></article><div style="height:800px"></div>';
+    main.scrollTop = 2000;
+  });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#questions button')?.textContent.includes('当前末尾提问'));
+  await widget.locator('#select-mode').click();
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions input').length === 2);
+  await widget.locator('#select-mode').click();
+  await page.evaluate(() => {
+    const main = document.querySelector('main');
+    const load = () => {
+      if (main.scrollTop > 1700) return;
+      main.removeEventListener('scroll', load);
+      setTimeout(() => main.insertAdjacentHTML('afterbegin', '<article id="auto-loaded-question" data-testid="conversation-turn-0"><div data-message-author-role="user" data-message-id="u0">自动加载的历史提问</div></article>'), 900);
+    };
+    main.addEventListener('scroll', load);
+  });
+  await items.first().click();
+  await page.waitForFunction(() => { const node = document.querySelector('#auto-loaded-question'); const top = node?.getBoundingClientRect().top; return top >= 70 && top < 110; });
+  assert.equal(await widget.locator('#download-status').textContent(), '');
+  results.push('An unloaded historical prompt automatically mounts after chat-container scrolling and the directory jumps to its actual turn.');
   assert.deepEqual(errors, []);
   await writeFile('artifacts/floating-report.json', JSON.stringify({ status: 'passed', fixtureOnly: true, results, errors }, null, 2));
   console.log(results.join('\n'));

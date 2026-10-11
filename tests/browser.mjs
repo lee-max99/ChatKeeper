@@ -10,7 +10,7 @@ const extensionPath = resolve('dist');
 const context = await chromium.launchPersistentContext('', {
   channel: 'chromium', headless: true, acceptDownloads: true,
   ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
-  args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`, '--enable-unsafe-extension-debugging'],
+  ignoreDefaultArgs: ['--disable-extensions'], args: ['--enable-unsafe-extension-debugging'],
 });
 const report = [];
 const errors = [];
@@ -40,10 +40,11 @@ await context.addInitScript(() => {
 });
 await context.route('https://assets.example.test/**', route => route.abort());
 await context.route('https://example.com/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>Other site</h1>' }));
+const browserCdp = await context.browser().newBrowserCDPSession();
+await browserCdp.send('Extensions.loadUnpacked', { path: extensionPath });
 const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
 const extensionId = worker.url().split('/')[2];
 const source = context.pages()[0] || await context.newPage();
-const browserCdp = await context.browser().newBrowserCDPSession();
 await browserCdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: resolve('artifacts/downloads'), eventsEnabled: true });
 await browserCdp.send('Target.setDiscoverTargets', { discover: true });
 // Toolbar popups are real CDP targets but are not exposed by Playwright as pages.

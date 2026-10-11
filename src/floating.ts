@@ -1,5 +1,6 @@
 import { floatingStyle } from './floating-style';
-import { collectQuestions, jumpToQuestion, outlinePageFingerprint, savedQuestionOutline, type OutlineEntry } from './question-outline';
+import { collectQuestions, outlinePageFingerprint, savedQuestionOutline, type OutlineEntry } from './question-outline';
+import { navigateQuestion } from './question-navigation';
 import { mountFloatingDownload } from './floating-download';
 import { mountFloatingSelection } from './floating-selection';
 import type { Conversation } from './types';
@@ -30,6 +31,12 @@ export function mountFloating(bridge: (type: string) => unknown): void {
   const questionVersion = (data?: Conversation) => JSON.stringify(data?.messages.filter(message => message.role === 'user').map(message => [message.id, message.markdown ?? message.html]));
   let position: Position | undefined; let dragged = false; let active = -1;
   let scrollFrame = 0;
+  let navigationRun = 0; let navigating = false;
+  function stopNavigation(notify = false): void {
+    navigationRun++;
+    if (navigating && notify) downloads.message('已停止定位。');
+    navigating = false;
+  }
   let selection: ReturnType<typeof mountFloatingSelection> | undefined; let renderedSelecting = false;
 
   function place(): void {
@@ -69,9 +76,20 @@ export function mountFloating(bridge: (type: string) => unknown): void {
       button.addEventListener('click', () => {
         if (location.href !== renderedUrl) { dirty = true; update(); return; }
         if (selection?.active) { selection.toggle(entry.identity); return; }
-        const latest = usingSavedOutline && saved ? savedQuestionOutline(saved, document).find(item => item.identity === entry.identity) :
-          collectQuestions(document).find(item => item.element === entry.element && item.target === entry.target);
-        if (!latest || !jumpToQuestion(latest)) downloads.message('暂时无法定位该提问，请在聊天页加载后重试。下载不受影响。');
+        if (downloads.busy) return;
+        stopNavigation(); navigating = true;
+        const token = navigationRun;
+        const current = () => token === navigationRun && location.href === renderedUrl && expanded && !host.hidden && !selection?.active;
+        void navigateQuestion(entry, () => usingSavedOutline && saved ? savedQuestionOutline(saved, document) : collectQuestions(document), current,
+          text => downloads.message(text)).then(result => {
+          if (!current()) return;
+          navigating = false;
+          if (usingSavedOutline) { outlineFingerprint = outlinePageFingerprint(document); refreshAt = 0; }
+          downloads.message(result === 'found' ? '' : '自动加载后仍无法定位该提问，可稍后重试。下载不受影响。');
+        }).catch(() => {
+          if (!current()) return;
+          navigating = false; downloads.message('暂时无法定位该提问，可稍后重试。下载不受影响。');
+        });
       });
       if (selecting && selection) item.append(selection.checkbox(entry, index));
       item.append(button); fragment.append(item); buttons.push(button);
@@ -84,6 +102,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
     }
   }
   function show(value: boolean): void {
+    if (!value) stopNavigation();
     expanded = value; panel.hidden = !value; launcher.hidden = value;
     launcher.setAttribute('aria-expanded', String(value));
     if (value) dirty = true;
@@ -92,6 +111,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
   function update(): void {
     if (!host.isConnected && document.body) document.body.append(host);
     if (location.href !== lastUrl) {
+      stopNavigation();
       const changedConversation = lastUrl && new URL(lastUrl).pathname !== location.pathname;
       if (changedConversation) staleQuestions = [...staleQuestions.filter(entry => entry.element?.isConnected), ...entries];
       // Invalidate only export preparation for the previous URL, including toolbar jobs.
@@ -133,7 +153,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
     get('read-outline').hidden = waitingForContent;
     if (waitingForContent) { count.textContent = '0 个提问'; empty.hidden = false; }
     highlight(); place();
-    if (usingSavedOutline && saved && refreshAt && Date.now() >= refreshAt && !waitingForContent && !downloads.busy) {
+    if (usingSavedOutline && saved && refreshAt && Date.now() >= refreshAt && !waitingForContent && !downloads.busy && !navigating) {
       const info = bridge('CK_INFO') as { ok: boolean; data?: { generating: boolean } };
       if (info.ok && !info.data?.generating) { refreshAt = 0; downloads.start('outline'); }
     }
@@ -174,6 +194,17 @@ export function mountFloating(bridge: (type: string) => unknown): void {
     scrollFrame = requestAnimationFrame(() => { scrollFrame = 0; highlight(); });
   }, { capture: true, passive: true });
   window.addEventListener('popstate', update); window.addEventListener('hashchange', update);
+  const manualScroll = (event: Event) => {
+    if (event.composedPath().includes(host)) return;
+    stopNavigation(true);
+  };
+  window.addEventListener('wheel', manualScroll, { capture: true, passive: true });
+  window.addEventListener('touchstart', manualScroll, { capture: true, passive: true });
+  window.addEventListener('pointerdown', manualScroll, { capture: true, passive: true });
+  window.addEventListener('keydown', event => {
+    if (event.key === 'Escape') stopNavigation(true);
+    else if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' '].includes(event.key)) manualScroll(event);
+  }, true);
   let updateTimer: ReturnType<typeof setTimeout> | undefined;
   new MutationObserver(records => {
     if (!records.some(record => record.target !== host && !host.contains(record.target))) return;
@@ -199,6 +230,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
   }).catch(() => {});
   const downloads = mountFloatingDownload(root, bridge, data => {
     if (data.url !== location.href) return;
+    if (navigating && questionVersion(saved) !== questionVersion(data)) stopNavigation();
     // Current-URL records can supply the directory before the page replaces its old nodes.
     if (usingSavedOutline) waitingForContent = false;
     if (readWasRefresh && beforeReadQuestions === questionVersion(data) && refreshRetries > 0 && !refreshAt) {
@@ -207,6 +239,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
     saved = data; selection?.sync(data); dirty = true; update();
   }, place, {
     started(purpose) {
+      stopNavigation();
       readWasRefresh = purpose === 'outline' && usingSavedOutline && Boolean(saved);
       beforeReadQuestions = questionVersion(saved);
       if (purpose === 'outline' || waitingForContent) usingSavedOutline = true;
@@ -218,11 +251,11 @@ export function mountFloating(bridge: (type: string) => unknown): void {
         refreshAt = Date.now() + 800; refreshRetries = 1;
       } else { refreshAt = 0; refreshRetries = 0; }
     },
-    prepareExport: () => selection?.prepareExport() ?? (data => data),
+    prepareExport: () => { stopNavigation(); return selection?.prepareExport() ?? (data => data); },
     stateChanged: () => selection?.lock(),
   });
   selection = mountFloatingSelection(root, {
-    read: () => downloads.start('outline'), changed: () => { dirty = true; update(); },
+    read: () => downloads.start('outline'), changed: () => { stopNavigation(); dirty = true; update(); },
     downloading: () => downloads.downloading, availability: downloads.availability, message: downloads.message,
   });
   document.body.append(host); update();
