@@ -8,13 +8,14 @@ function errorText(error: unknown, fallback: string): string {
 }
 
 export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) => unknown, ready: (data: Conversation) => void, resized: () => void,
-  lifecycle: { started?: (purpose: 'outline' | 'download') => void; failed?: (error: unknown) => void;
+  lifecycle: { reuse?: () => boolean; started?: (purpose: 'outline' | 'download', source: 'new' | 'running' | 'cached') => void; failed?: (error: unknown) => void;
     prepareExport?: () => (data: Conversation) => Conversation; stateChanged?: () => void } = {}) {
   const button = root.getElementById('download') as HTMLButtonElement;
   const format = root.getElementById('download-format') as HTMLSelectElement;
   const read = root.getElementById('read-outline') as HTMLButtonElement;
   const cancel = root.getElementById('download-cancel') as HTMLButtonElement;
   const status = root.getElementById('download-status')!;
+  const retry = root.getElementById('download-retry') as HTMLButtonElement | null;
   let busy = false; let run = 0; let timer: ReturnType<typeof setTimeout> | undefined;
   let operation: 'outline' | 'download' | undefined;
   let exportData: ((data: Conversation) => Conversation) | undefined;
@@ -25,6 +26,7 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
     return result;
   };
   function message(text: string, error = false): void {
+    if (retry) retry.hidden = !error || busy;
     status.textContent = text; status.className = error ? 'error' : '';
     status.parentElement!.hidden = !text && !busy; resized();
   }
@@ -78,13 +80,15 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
       const info = request<{ data: PageInfo }>('CK_INFO').data;
       if (info.generating) throw new Error('回答还在生成，请等待结束后重试。');
       const job = request<ExportJob>('CK_STATUS');
-      lifecycle.started?.(purpose);
-      if (job.state !== 'running') request('CK_PREPARE');
+      const reuse = purpose === 'download' && job.state === 'done' && lifecycle.reuse?.();
+      lifecycle.started?.(purpose, job.state === 'running' ? 'running' : reuse ? 'cached' : 'new');
+      if (job.state !== 'running' && !reuse) request('CK_PREPARE');
       void poll(token, url);
     } catch (error) {
       setBusy(false); lifecycle.failed?.(error); message(errorText(error, '读取失败，请重试。'), true);
     }
   }
+  retry?.addEventListener('click', () => start(operation || 'download'));
   button.addEventListener('click', () => start('download'));
   read.addEventListener('click', () => start('outline'));
   cancel.addEventListener('click', () => { bridge('CK_CANCEL'); cancel.disabled = true; message('正在取消…'); });

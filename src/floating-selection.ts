@@ -3,7 +3,7 @@ import type { ChatMessage, Conversation } from './types';
 import type { OutlineEntry } from './question-outline';
 
 export function mountFloatingSelection(root: ShadowRoot, controls: {
-  read: () => void; changed: () => void; downloading: () => boolean;
+  cached?: () => Conversation | undefined; read: () => void; changed: () => void; downloading: () => boolean;
   availability: (label: string, disabled: boolean) => void; message: (text: string) => void;
 }) {
   const mode = root.getElementById('select-mode') as HTMLButtonElement;
@@ -39,8 +39,10 @@ export function mountFloatingSelection(root: ShadowRoot, controls: {
   mode.addEventListener('click', () => {
     if (controls.downloading()) return;
     active = !active; ready = false; questions = []; chosen.clear();
+    const cached = active ? controls.cached?.() : undefined;
+    if (cached) { questions = cached.messages.filter(message => message.role === 'user'); ready = true; }
     update(); controls.message(''); controls.changed();
-    if (active) controls.read();
+    if (active && !cached) controls.read();
   });
   all.addEventListener('click', () => {
     if (!ready || controls.downloading()) return;
@@ -49,6 +51,15 @@ export function mountFloatingSelection(root: ShadowRoot, controls: {
   clear.addEventListener('click', () => {
     if (controls.downloading()) return;
     chosen.clear(); controls.message(''); update();
+  });
+  const range = root.getElementById('select-range') as HTMLButtonElement | null;
+  range?.addEventListener('click', () => {
+    if (!ready || controls.downloading()) return;
+    const from = Number((root.getElementById('range-from') as HTMLInputElement).value);
+    const to = Number((root.getElementById('range-to') as HTMLInputElement).value);
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from || to > questions.length) { controls.message(`请输入 1～${questions.length} 内的有效范围。`); return; }
+    questions.slice(from - 1, to).forEach(question => chosen.set(question.id, { ...question }));
+    controls.message(''); update();
   });
   update();
   return {

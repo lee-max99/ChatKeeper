@@ -191,8 +191,9 @@ try {
   await widget.locator('#launcher').waitFor({ state: 'visible' });
   assert.equal(await widget.locator('#panel').isVisible(), false);
   await widget.locator('#launcher').click();
+  await page.waitForFunction(() => document.querySelector("#chatkeeper-widget").shadowRoot.querySelectorAll("#questions button").length === 4);
   const restored = await widget.boundingBox();
-  assert.equal(Math.abs(restored.x - afterDrag.x) < 3 && Math.abs(restored.y - afterDrag.y) < 3, true);
+  assert.equal(Math.abs(restored.x - afterDrag.x) < 3 && Math.abs(restored.y - Math.min(afterDrag.y, 720 - restored.height - 12)) < 3, true);
   results.push('Dragging, keyboard reopening, and persisted position work; reload starts collapsed.');
 
   await worker.evaluate(() => chrome.storage.local.set({ floatingEnabled: false })); await widget.waitFor({ state: 'hidden' });
@@ -364,6 +365,7 @@ try {
   assert.deepEqual(await items.locator('.question-text').allTextContents(), apiPrompts);
   results.push('A refreshed saved path replaces obsolete questions after editing or changing the current branch instead of accumulating old paths.');
   delay = 1200;
+  await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<p>新的回答内容，准备时需要更新</p>'));
   await widget.locator('#download').click(); await widget.locator('#download-cancel').waitFor({ state: 'visible' }); await widget.locator('#download-cancel').click();
   await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#download-status').textContent.includes('取消') && document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#download-cancel').hidden);
   const beforeNavigation = await worker.evaluate(async () => (await chrome.downloads.search({})).length);
@@ -393,7 +395,7 @@ try {
   delay = 500;
   await widget.locator('#select-mode').click();
   assert.equal(await widget.locator('#download').isDisabled(), true, 'No selection must never fall through to exporting everything');
-  await widget.locator('#questions input[type=checkbox]').first().waitFor({ timeout: 6000 });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions input[type=checkbox]').length === 5, undefined, { timeout: 6000 });
   assert.equal(await widget.locator('#questions input[type=checkbox]').count(), 5, 'Selection uses complete saved questions rather than the partial DOM');
   assert.deepEqual(await items.locator('.question-text').allTextContents(), apiPrompts);
   delay = 0;
@@ -476,6 +478,20 @@ try {
   await page.waitForFunction(() => { const node = document.querySelector('#auto-loaded-question'); const top = node?.getBoundingClientRect().top; return top >= 70 && top < 110; });
   assert.equal(await widget.locator('#download-status').textContent(), '');
   results.push('An unloaded historical prompt automatically mounts after chat-container scrolling and the directory jumps to its actual turn.');
+  const readsBeforeSelection = requests.length;
+  await widget.locator('#select-mode').click();
+  assert.equal(await widget.locator('#questions input').count(), 2);
+  assert.equal(requests.length, readsBeforeSelection, 'Cached selection must not read the conversation again');
+  await widget.locator('#question-search').fill('历史');
+  assert.equal(await widget.locator('#questions li:visible').count(), 1);
+  await widget.locator('#range-from').fill('1'); await widget.locator('#range-to').fill('2');
+  await widget.locator('#select-range').click();
+  assert.match(await widget.locator('#selected-count').textContent(), /2 \/ 2/);
+  await widget.locator('#question-search').fill('没有这个提问');
+  assert.equal(await widget.locator('#search-empty').isVisible(), true);
+  await widget.locator('#question-search').fill('');
+  const rangeExport = await download('md'); assert.match(rangeExport, /自动加载的历史提问/); assert.match(rangeExport, /当前末尾提问/);
+  results.push('Cached selection opens without another API read; search filters rows without changing selections, and range selection exports the intended groups.');
   assert.deepEqual(errors, []);
   await writeFile('artifacts/floating-report.json', JSON.stringify({ status: 'passed', fixtureOnly: true, results, errors }, null, 2));
   console.log(results.join('\n'));
