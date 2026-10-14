@@ -1,9 +1,22 @@
+import { imageResponseData, trustedImageUrl } from './image-fetch';
+const imageRequests = new Map<string,AbortController>();
 chrome.runtime.onMessage.addListener((request, sender, respond) => {
-  if (!['DOWNLOAD', 'DOWNLOAD_STATUS'].includes(request?.type)) return false;
+  if (!['DOWNLOAD', 'DOWNLOAD_STATUS', 'FETCH_IMAGE', 'CANCEL_IMAGE'].includes(request?.type)) return false;
   let fromPage = false;
   try { const url = new URL(sender.url || ''); fromPage = sender.tab?.id !== undefined && sender.frameId === 0 && url.origin === 'https://chatgpt.com'; } catch { /* Reject invalid origins. */ }
   if (sender.id !== chrome.runtime.id || (sender.url !== chrome.runtime.getURL('popup.html') && !fromPage)) {
     respond({ ok: false, error: '无效的下载来源。' }); return false;
+  }
+  if (['FETCH_IMAGE','CANCEL_IMAGE'].includes(request.type)) {
+    if (typeof request.id !== 'string' || !/^[\w-]{1,64}$/.test(request.id)) {respond({ok:false});return false;}
+    const key = `${sender.tab?.id ?? 'popup'}:${request.id}`;
+    if (request.type === 'CANCEL_IMAGE') {imageRequests.get(key)?.abort();respond({ok:true});return false;}
+    const href = trustedImageUrl(request.url);
+    if (!href || imageRequests.size >= 32 || imageRequests.has(key)) { respond({ok:false}); return false; }
+    const controller = new AbortController(); imageRequests.set(key,controller);
+    const timer = setTimeout(() => controller.abort(),8_000);
+    void fetch(href, {credentials:'omit', redirect:'error', referrerPolicy:'no-referrer', signal:controller.signal}).then(imageResponseData).then(dataUrl => respond({ok:true,dataUrl}), () => respond({ok:false})).finally(() => {clearTimeout(timer);imageRequests.delete(key);});
+    return true;
   }
   if (request.type === 'DOWNLOAD_STATUS') {
     if (!Number.isInteger(request.id) || request.id < 0) { respond({ ok: false, error: '无效的下载任务。' }); return false; }
@@ -17,10 +30,10 @@ chrome.runtime.onMessage.addListener((request, sender, respond) => {
     }, error => respond({ ok: false, error: `无法确认保存结果：${String(error?.message || error)}。请按 Ctrl+J 查看下载列表。` }));
     return true;
   }
-  if (typeof request.content !== 'string' || !request.content.trim() || request.content.length > 10_000_000 ||
+  if (typeof request.content !== 'string' || !request.content.trim() || request.content.length > 25_000_000 ||
       typeof request.filename !== 'string' || /[\\/\x00-\x1f]/.test(request.filename) ||
       !['md', 'html'].includes(request.format) || !request.filename.endsWith(`.${request.format}`)) {
-    respond({ ok: false, error: '导出文件无效或过大（上限 1000 万字符）。' }); return false;
+    respond({ ok: false, error: '导出文件无效或过大（上限 2500 万字符）。' }); return false;
   }
   const mime = request.format === 'md' ? 'text/markdown' : 'text/html';
   void Promise.resolve().then(() => chrome.downloads.download({

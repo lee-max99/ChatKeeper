@@ -4,6 +4,8 @@ import type { Conversation } from './types';
 import { documentStyle } from './document-style';
 import readerScript from './reader.js?raw';
 import { markdownToHtml } from './markdown-renderer';
+import { uiSourceToHtml } from './ui-html';
+import { validImageData } from './image-assets';
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
@@ -63,11 +65,23 @@ function prepare(html: string, base: string, mode: 'md' | 'html'): string {
     else node.removeAttribute('href');
     node.removeAttribute('target');
   });
-  return DOMPurify.sanitize(doc.body.innerHTML, {
-    USE_PROFILES: { html: true, mathMl: true },
-    FORBID_TAGS: ['form', 'input', 'button', 'textarea', 'select', 'style', 'link', 'meta', 'base', 'img', 'video', 'audio', 'source'],
+  doc.querySelectorAll('svg,svg *').forEach(node => {
+    for (const attr of [...node.attributes]) {
+      if (/href$/i.test(attr.name) && !/^#ck-svg-[\w-]+$/.test(attr.value) || /url\(/i.test(attr.value) && !/^url\(#ck-svg-[\w-]+\)$/.test(attr.value)) node.removeAttribute(attr.name);
+    }
+  });
+  const sanitized = DOMPurify.sanitize(doc.body.innerHTML, {
+    USE_PROFILES: { html: true, mathMl: true, svg: true },
+    ADD_TAGS: ['use'],
+    FORBID_TAGS: ['form', 'input', 'button', 'textarea', 'select', 'style', 'link', 'meta', 'base', 'img', 'video', 'audio', 'source', 'image', 'foreignObject', 'animate', 'animateMotion', 'animateTransform', 'set'],
     FORBID_ATTR: ['style', 'id', 'name', 'src', 'srcset', 'background', 'autofocus', 'contenteditable'],
   });
+  const result = new DOMParser().parseFromString(sanitized,'text/html');
+  result.querySelectorAll('svg [data-ck-svg-id]').forEach(node => {
+    const id = node.getAttribute('data-ck-svg-id') || ''; if (/^ck-svg-[\w-]+$/.test(id)) node.id = id;
+    node.removeAttribute('data-ck-svg-id');
+  });
+  return result.body.innerHTML;
 }
 
 function markdownService(): TurndownService {
@@ -118,7 +132,7 @@ export function renderMarkdown(conversation: Conversation): string {
   const source = safeUrl(conversation.url, 'https://chatgpt.com');
   return [`# ${text(conversation.title)}`, `来源：${source ? `<${source}>` : '未知'}`, `导出时间：${text(conversation.exportedAt)}`,
     ...conversation.warnings.map(warning => `> ${text(warning)}`),
-    ...conversation.messages.map(message => `## ${message.role === 'user' ? '用户' : 'ChatGPT'}\n\n${message.markdown ?? service.turndown(prepare(message.html, conversation.url, 'md'))}`),
+    ...conversation.messages.map(message => `## ${message.role === 'user' ? '用户' : 'ChatGPT'}\n\n${message.markdown ?? service.turndown(prepare(message.html, conversation.url, 'md'))}${(message.images || []).filter(image => validImageData(image.dataUrl)).map(image => `\n\n![${text(image.alt).replace(/\]/g, '\\]')}](${image.dataUrl})`).join('')}`),
   ].join('\n\n') + '\n';
 }
 
@@ -129,8 +143,18 @@ export function renderHtml(conversation: Conversation): string {
   const outline: string[] = [];
   let question = 0;
   const messages = conversation.messages.map((message, index) => {
-    const doc = new DOMParser().parseFromString(prepare(message.markdown !== undefined ? markdownToHtml(message.markdown) : message.html, conversation.url, 'html'), 'text/html');
+    const doc = new DOMParser().parseFromString(prepare(message.uiSource ? uiSourceToHtml(message.uiSource) : message.markdown !== undefined ? markdownToHtml(message.markdown) : message.html, conversation.url, 'html'), 'text/html');
     const anchor = `message-${index + 1}`;
+    for (const [imageIndex, image] of (message.images || []).entries()) {
+      if (!validImageData(image.dataUrl)) continue;
+      const figure = doc.createElement('figure'); figure.className = 'saved-image';
+      const img = doc.createElement('img'); img.src = image.dataUrl; img.alt = image.alt;
+      const caption = doc.createElement('figcaption'); caption.append(image.alt + ' · ');
+      const save = doc.createElement('a'); save.href = image.dataUrl; save.textContent = '保存图片';
+      const extension = image.dataUrl.match(/^data:image\/([^;]+)/)![1].replace('jpeg','jpg');
+      save.download = `图片-${index + 1}-${imageIndex + 1}.${extension}`;
+      caption.append(save); figure.append(img, caption); doc.body.append(figure);
+    }
     if (message.role === 'user') {
       question++;
       const text = (doc.body.textContent || '附件消息').replace(/\s+/g, ' ').trim();
@@ -146,7 +170,7 @@ export function renderHtml(conversation: Conversation): string {
   const exportedAt = Number.isNaN(date.getTime()) ? conversation.exportedAt : date.toLocaleString('zh-CN', { hour12: false });
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
 <title>${escapeHtml(conversation.title)}</title><style>${documentStyle}</style></head><body class="outline-open">
 <button id="menu-toggle" class="menu-toggle" type="button" aria-label="切换目录" aria-expanded="true" aria-controls="outline-panel">☰</button>
 <button id="backdrop" class="backdrop" type="button" aria-label="关闭目录"></button>

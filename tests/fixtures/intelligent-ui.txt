@@ -1,0 +1,25 @@
+<text color="secondary" size="xs">计算方式：序号非递增次数 ÷ 收到的GF2有效帧数。</text>
+
+<Chart content={{"chartType":"bar","meta":{"footer":"仅表示序号非递增占比，不等于永久丢包率。"},"xKey":"role","series":[{"dataKey":"rate","label":"非递增占比","valueSuffix":"%"}],"yAxisMin":0,"data":[{"role":"L1","rate":8.42},{"role":"L3","rate":8.86},{"role":"R1","rate":9.23}]}}/>
+
+这里的118,532次，是指当前帧的采样序号小于或等于上一帧，包括真正的重复帧和乱序后到达的旧帧。
+
+**它的准确名称应是“序号非递增率8.87%”，而不是“丢包率8.87%”。** 原始GF2数据没有包含在这次ZIP里，目前无法精确拆分为重复多少、乱序多少。
+
+## 2. CRC错误
+
+<row align="center" gap={3}>
+
+CRC错误帧
+
+<title size="xl" tabularNums>3帧</title>
+
+CRC错误率
+
+<title size="xl" tabularNums>0.0002245%</title>
+
+</row>
+
+按1,336,285帧有效CRC数据与3帧CRC错误计算，约每百万帧出现2.25次CRC错误。
+
+这说明**CRC损坏不是本轮最主要的异常，明显更突出的是序号异常和周期停流。**

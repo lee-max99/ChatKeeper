@@ -49,7 +49,13 @@ async function poll(): Promise<void> {
     downloadWhenReady = false;
     await request('CK_CHECK');
     setBusy(true); setStatus('正在生成文件…');
-    const data = { ...job.data, title: title.value.trim() || job.data.title, exportedAt: new Date().toISOString() };
+    let data = { ...job.data, title: title.value.trim() || job.data.title, exportedAt: new Date().toISOString() };
+    if (data.messages.some(message => message.images?.length)) {
+      setBusy(true,true); setStatus('正在保存图片…');
+      const result = await chrome.tabs.sendMessage(tabId!, {type:'CK_IMAGES',ids:data.messages.map(message => message.id)});
+      if (!result?.ok || !result.data) throw new Error(result?.error || '图片读取失败，请重试。');
+      data = {...data,messages:result.data.messages,warnings:result.data.warnings};
+    }
     const selected = format();
     const content = selected === 'md' ? renderMarkdown(data) : renderHtml(data);
     // Recheck after conversion as a long document may take time to format.
@@ -58,7 +64,7 @@ async function poll(): Promise<void> {
     const result = await saveDownload({ type: 'DOWNLOAD', format: selected,
       filename: safeFilename(`${data.title}_${new Date().toLocaleDateString('sv-SE')}`, selected), content,
     }, setStatus);
-    setBusy(false); setStatus(result);
+    setBusy(false); setStatus(result + (data.warnings.find(warning => /张图片未能保存/.test(warning)) ? '；部分图片未保存，详情见导出文件。' : ''));
   } catch (error) { fail(error); }
 }
 async function startExport(): Promise<void> {

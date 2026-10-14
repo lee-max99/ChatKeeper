@@ -1,0 +1,20 @@
+## 测试目标与设备连接
+
+<box border radius="lg" padding={3}>
+<row>
+<box align="center"><icon name="monitor"/><title size="lg">电脑 A：H723 HUB</title><text color="secondary">XCOM · 1000000 baud</text><text>负责扫描、配置、同步、RUN 和接收数据</text></box>
+<box align="center"><icon name="monitor"/><title size="lg">电脑 B：Z7 Glove</title><text color="secondary">Core1 UART0 · 1000000 baud</text><text>负责采集状态查询、500ms 注入和 Catch-up 诊断</text></box>
+</row>
+<svg viewBox="0 0 800 140" width="100%">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#09998d"/></marker></defs>
+<rect x="0" y="40" width="230" height="70" rx="12" fill="#e9e9ed"/>
+<rect x="570" y="40" width="230" height="70" rx="12" fill="#e9e9ed"/>
+<line x1="265" y1="75" x2="535" y2="75" stroke="#09998d" stroke-width="3" stroke-dasharray="10 6" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text x="115" y="84" text-anchor="middle" font-size="28" font-weight="bold">H723 HUB</text>
+<text x="685" y="84" text-anchor="middle" font-size="28" font-weight="bold">Z7 Glove</text>
+<text x="400" y="35" text-anchor="middle" font-size="24" fill="#09998d">BLE / UWB</text>
+</svg>
+<text color="secondary" align="center">两台电脑不需要互连，各自控制本地串口即可。</text>
+</box>
+
+本次测试的核心过程。

@@ -20,6 +20,12 @@ let responseStatus = 200;
 let responseDelay = 0;
 let sessionStatus = 200;
 const apiCalls = [];
+const pngBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWJiYGBgAAAAAP//XRcpzQAAAAZJREFUAwAADwADJDd96QAAAABJRU5ErkJggg==', 'base64');
+await context.route('https://images.oaiusercontent.com/original.png', async route => {
+  assert.equal(route.request().headers().authorization, undefined);
+  await route.fulfill({contentType:'image/png',headers:{'Access-Control-Allow-Origin':'*'},body:pngBytes});
+});
+await context.route(/https:\/\/(?:assets\.example\.test|example\.test)\/.*\.png/, route => route.fulfill({status:404,headers:{'Access-Control-Allow-Origin':'*'},body:'missing'}));
 await context.route('https://chatgpt.com/**', async route => {
   const path = new URL(route.request().url()).pathname;
   if (path === '/api/auth/session') { apiCalls.push(path); await route.fulfill({ status: sessionStatus, contentType: 'application/json', body: JSON.stringify({ accessToken: 'fixture-token-not-a-real-secret' }) }); return; }
@@ -28,6 +34,10 @@ await context.route('https://chatgpt.com/**', async route => {
     assert.equal(route.request().headers().authorization, 'Bearer fixture-token-not-a-real-secret');
     if (responseDelay) await new Promise(resolveWait => setTimeout(resolveWait, responseDelay));
     await route.fulfill({ status: responseStatus, contentType: 'application/json', body: JSON.stringify(payload) }).catch(() => {}); return;
+  }
+  if (path === '/backend-api/files/file-abc/download') {
+    assert.equal(route.request().headers().authorization, 'Bearer fixture-token-not-a-real-secret');
+    await route.fulfill({contentType:'application/json',body:JSON.stringify({download_url:'https://images.oaiusercontent.com/original.png'})}); return;
   }
   await route.fulfill({ contentType: 'text/html', body: fixture });
 });
@@ -312,6 +322,139 @@ try {
   const retriedSave = await download(popup, 'md'); assert.match(retriedSave.content, /每周回顾一次/);
   await popup.close();
   report.push('A browser-denied save that returns a download ID is reported as unsaved in the popup, and a manual retry confirms an actual completed file.');
+
+  payload = shortConversation();
+  const imageMarker = '\ue200i\ue202turn0image0\ue201';
+  payload.mapping['assistant-2'].message.content.parts = [
+    `正文在前。${imageMarker}\n\n\ue200image_group\ue202{"query":["电路结构"],"layout":"carousel"}\ue201\n\n\ue200widget\ue202{"private_id":"opaque-component-id"}\ue201\n\n正文在后。`,
+    { content_type: 'image_asset_pointer', caption: '电路示意图', url: 'https://assets.example.test/circuit.png', asset_pointer: 'file-service://opaque-file' },
+  ];
+  payload.mapping['assistant-2'].message.metadata = { content_references: [{ matched_text: imageMarker, title: '插图来源', image_url: 'https://assets.example.test/picture.png' }] };
+  popup = await openPopup();
+  const richMarkdown = await download(popup, 'md'); const richHtml = await download(popup, 'html');
+  for (const result of [richMarkdown, richHtml]) {
+    assert.match(result.content, /正文在前/); assert.match(result.content, /正文在后/);
+    assert.match(result.content, /电路示意图/); assert.match(result.content, /原对话/);
+    assert.doesNotMatch(result.content, /[\ue200\ue201\ue202]|opaque-component-id|opaque-file|turn0image0/);
+  }
+  await popup.close();
+  const richPreview = await context.newPage(); const richOutgoing = [];
+  richPreview.on('request', request => { if (/^https?:/.test(request.url())) richOutgoing.push(request.url()); });
+  await context.setOffline(true);
+  await richPreview.goto(`file:///${richHtml.path.replaceAll('\\', '/')}`);
+  assert.equal(await richPreview.locator('.body img,.body iframe,.body script').count(), 0);
+  assert.equal(await richPreview.locator('a[href="https://assets.example.test/circuit.png"]').count(), 1);
+  assert.deepEqual(richOutgoing, []);
+  await richPreview.screenshot({ path: 'artifacts/rich-content-export.png', fullPage: true });
+  await richPreview.close(); await context.setOffline(false);
+  report.push('Image references and rich-content markers export as readable links/fallbacks in Markdown and offline HTML, without protocol IDs, remote loads, or executable components.');
+
+  // Transcribed screenshot regression: XML-like layout tags and indentation.
+  payload = shortConversation();
+  payload.mapping['assistant-2'].message.content.parts = [await readFile('tests/fixtures/ui-markup.txt', 'utf8')];
+  popup = await openPopup();
+  const uiMarkdown = await download(popup, 'md'); const uiHtml = await download(popup, 'html');
+  await popup.close();
+  assert.doesNotMatch(uiMarkdown.content, /<\/?(?:box|text|row|icon|divider)\b|padding=|color=/);
+  assert.match(uiMarkdown.content, /MeasurementSource: FIFO 128[\s\S]*↓[\s\S]*Batcher: 3 Records \/ Batch[\s\S]*↓[\s\S]*UploadManager: PIPE4 \/ RETX/);
+  await writeFile('artifacts/ui-markup-export.md', uiMarkdown.content);
+  await writeFile('artifacts/ui-markup-export.html', uiHtml.content);
+  const uiPreview = await context.newPage(); const uiOutgoing = [];
+  uiPreview.on('request', request => { if (/^https?:/.test(request.url())) uiOutgoing.push(request.url()); });
+  await context.setOffline(true);
+  await uiPreview.goto(`file:///${resolve('artifacts/ui-markup-export.html').replaceAll('\\', '/')}`);
+  const uiBody = uiPreview.locator('.message.assistant .body').last();
+  assert.doesNotMatch(await uiBody.textContent(), /<\/?(?:box|text|row|icon|divider)\b|padding=|color=/);
+  assert.match(await uiBody.textContent(), /C2：达到阈值后/);
+  assert.match(await uiBody.textContent(), /C3：跨 Host\/BLE 的完整恢复/);
+  assert.equal(await uiBody.locator('pre,script,img,iframe,box,text').count(), 0);
+  assert.equal(await uiBody.locator('strong').count(), 4);
+  assert.deepEqual(uiOutgoing, []);
+  await uiBody.screenshot({ path: 'artifacts/ui-markup-export.png' });
+  await uiPreview.close(); await context.setOffline(false);
+  report.push('The reported box/text layout exports readable flow labels, arrows and C1/C2/C3 notes in Markdown and offline HTML, without escaped layout tags or accidental code blocks.');
+
+  for (const example of [
+    { fixture: 'intelligent-ui', tables: 1, labels: ['计算方式', '8.42%', '8.86%', '9.23%', '仅表示序号非递增占比，不等于永久丢包率。', 'CRC错误帧', '3帧', '0.0002245%', '1,336,285', '周期停流'] },
+    { fixture: 'ui-components', tables: 2, labels: ['设备汇总', '23°C', '保留这段说明', '方案一', '方案二', '设备A', '设备B', '第一项', '第二项', '重新计算', '人数：5', '☑', '☐', '进度：25', '原对话'] },
+  ]) {
+    payload = shortConversation();
+    payload.mapping['assistant-2'].message.content.parts = [await readFile(`tests/fixtures/${example.fixture}.txt`, 'utf8')];
+    popup = await openPopup();
+    const md = await download(popup, 'md'); const html = await download(popup, 'html');
+    await popup.close();
+    for (const label of example.labels) assert.ok(md.content.includes(label), `Markdown retains ${label}`);
+    await writeFile(`artifacts/${example.fixture}-0.7.md`, md.content);
+    await writeFile(`artifacts/${example.fixture}-0.7.html`, html.content);
+    const preview = await context.newPage(); const outgoing = [];
+    preview.on('request', request => { if (/^https?:/.test(request.url())) outgoing.push(request.url()); });
+    await context.setOffline(true);
+    await preview.goto(`file:///${resolve(`artifacts/${example.fixture}-0.7.html`).replaceAll('\\', '/')}`);
+    const body = preview.locator('.message.assistant .body').last();
+    for (const label of example.labels) assert.ok((await body.textContent()).includes(label), `HTML retains ${label}`);
+    assert.equal(await body.locator('table').count(), example.tables);
+    assert.equal(await body.locator('script,iframe,img,input,button:not(.code-copy),box,text,title').count(), 0);
+    assert.equal(await body.locator('pre > button.code-copy').count(), await body.locator('pre').count());
+    const prose = await body.evaluate(node => { const copy = node.cloneNode(true); copy.querySelectorAll('pre,code').forEach(code => code.remove()); return copy.textContent; });
+    assert.doesNotMatch(prose, /<\/?[A-Za-z][\w-]*\b|chartType|dataKey|tabularNums|content=|private-hidden|secret-widget/);
+    if (example.fixture === 'ui-components') {
+      assert.equal(await body.locator('a[href="https://example.test/docs"]').count(), 1);
+      assert.equal(await body.locator('a[href="https://example.test/plot.png"]').count(), 1);
+      assert.match(await body.locator('pre').textContent(), /<Chart content=/);
+    }
+    assert.deepEqual(outgoing, []);
+    await body.screenshot({ path: `artifacts/${example.fixture}-0.7.png` });
+    await preview.close(); await context.setOffline(false);
+    report.push(`v0.7 ${example.fixture}: static UI data, tables, labels and surrounding prose survive both downloads, with code examples protected and no remote requests.`);
+  }
+
+  payload = shortConversation();
+  payload.mapping['assistant-2'].message.content.parts = [
+    '<grid columns={2} gap={3}><box border padding={3}><text color="secondary">剩余授权</text><title color="success" size="xl">11小时52分11秒</title></box><box border><text>缺失率</text><title color="danger">0.00326%</title></box></grid>\n\n<row>{#each [88281,88282,88283,88284,88285,88286] as seq}<box border><text>{seq}</text>{#if seq === 88284}<text color="danger">✕</text>{:else}<text color="success">✓</text>{/if}</box>{/each}</row>',
+    {content_type:'image_asset_pointer',asset_pointer:'file-service://file-abc',caption:'原图测试'},
+  ];
+  popup = await openPopup();
+  const visualMd = await download(popup,'md'); const visualHtml = await download(popup,'html'); await popup.close();
+  assert.match(visualMd.content,/data:image\/png;base64/); assert.doesNotMatch(visualMd.content,/#each|\{seq\}|columns/);
+  const visual = await context.newPage(); const visualOutgoing = [];
+  visual.on('request', request => {if (/^https?:/.test(request.url())) visualOutgoing.push(request.url());});
+  await context.setOffline(true); await visual.goto(`file:///${visualHtml.path.replaceAll('\\','/')}`);
+  const visualBody = visual.locator('.message.assistant .body').last();
+  assert.equal(await visualBody.locator('.ck-row .ck-box').count(),6);
+  assert.equal(await visualBody.locator('.ck-grid-2').evaluate(node => getComputedStyle(node).display),'grid');
+  assert.equal(await visualBody.locator('.ck-title.ck-success').evaluate(node => getComputedStyle(node).color),'rgb(0, 164, 70)');
+  assert.equal(await visualBody.locator('img').evaluate(img => img.complete && img.naturalWidth > 0),true);
+  assert.equal(await visualBody.locator('script,iframe').count(),0); assert.deepEqual(visualOutgoing,[]);
+  await visualBody.screenshot({path:'artifacts/ui-images-0.7.1.png'});
+  const pictureDownload = visual.waitForEvent('download'); await visualBody.locator('a[download]').click();
+  const picture = await pictureDownload;
+  const deadline = Date.now() + 10_000; let savedPicture;
+  while (Date.now() < deadline) {
+    savedPicture = await worker.evaluate(async () => (await chrome.downloads.search({orderBy:['-startTime'],limit:1}))[0]);
+    if (savedPicture?.state === 'complete' && savedPicture.filename.endsWith('.png')) break;
+    await new Promise(resolveWait => setTimeout(resolveWait,100));
+  }
+  assert.equal(savedPicture?.state,'complete'); assert.equal(await picture.failure(),null);
+  assert.deepEqual(await readFile(savedPicture.filename),pngBytes);
+  await visual.close(); await context.setOffline(false);
+  report.push('Static card styling and literal each/if templates render correctly; original PNG embeds in both formats, displays offline and saves individually with identical bytes.');
+
+  payload = shortConversation(); payload.mapping['assistant-2'].message.content.parts = [await readFile('tests/fixtures/connection-diagram.txt','utf8')];
+  popup = await openPopup(); const diagramMd = await download(popup,'md'); const diagramHtml = await download(popup,'html'); await popup.close();
+  assert.match(diagramMd.content,/H723 HUB/); assert.match(diagramMd.content,/BLE \/ UWB/); assert.doesNotMatch(diagramMd.content,/无法完整离线还原|<rect|<path/);
+  const diagramPreview = await context.newPage(); const diagramOutgoing = [];
+  diagramPreview.on('request', request => {if (/^https?:/.test(request.url())) diagramOutgoing.push(request.url());});
+  await context.setOffline(true); await diagramPreview.goto(`file:///${diagramHtml.path.replaceAll('\\','/')}`);
+  const diagramBody = diagramPreview.locator('.message.assistant .body').last();
+  assert.equal(await diagramBody.locator('.ck-monitor').count(),2);
+  assert.equal(await diagramBody.locator('.ck-static-svg rect').count(),2);
+  assert.equal(await diagramBody.locator('.ck-static-svg line').count(),1);
+  assert.equal(await diagramBody.locator('.ck-static-svg marker').count(),1);
+  assert.equal(await diagramBody.locator('line').evaluate(node => getComputedStyle(node).markerEnd.includes(document.querySelector('.body marker').id)),true);
+  assert.doesNotMatch(await diagramBody.textContent(),/无法完整离线还原/); assert.deepEqual(diagramOutgoing,[]);
+  await diagramBody.screenshot({path:'artifacts/connection-diagram-0.7.2.png'});
+  await diagramPreview.close(); await context.setOffline(false);
+  report.push('Static SVG diagram retains monitor icons, device boxes, dashed line and local arrow markers offline; Markdown retains diagram labels without repeated fallbacks.');
 
   await source.evaluate(() => { const button = document.createElement('button'); button.dataset.testid = 'stop-button'; document.body.append(button); });
   popup = await openPopup();

@@ -1,10 +1,10 @@
-# ChatKeeper · v0.6.5
+# ChatKeeper · v0.7.2
 
 我写的一个 ChatGPT 浏览器插件，用来查找提问、保存对话。支持 Chrome / Edge，可以导出 Markdown 或带目录、搜索的离线 HTML，无需 API Key。
 
 ## 安装
 
-[下载安装包](https://github.com/lee-max99/ChatKeeper/releases/download/v0.6.5/ChatKeeper-0.6.5.zip) · [所有版本](https://github.com/lee-max99/ChatKeeper/releases)
+[下载安装包](https://github.com/lee-max99/ChatKeeper/releases/download/v0.7.2/ChatKeeper-0.7.2.zip) · [所有版本](https://github.com/lee-max99/ChatKeeper/releases)
 
 1. 下载并解压安装包。
 2. 打开 `chrome://extensions` 或 `edge://extensions`，开启开发者模式。
@@ -25,29 +25,15 @@
 
 ## 说明
 
-导出的是当前会话的一条回答分支，不包含账号全部历史。图片、音频和附件保留名称或可用链接，不嵌入原文件；特殊工具内容可能无法完整还原。保存记录仍带未完成标记时，导出文件会提醒内容可能尚未完整保存。
+导出的是当前会话的一条回答分支，不包含账号全部历史。点击下载时尝试读取聊天原图并嵌入文件：HTML 可离线显示并通过“保存图片”单独下载，Markdown 使用内嵌图片链接（阅读器需支持 data URL）。音频和其他附件保留名称或可用链接。图片读取失败会明确提示并保留聊天正文。保存记录仍带未完成标记时，导出文件会提醒内容可能尚未完整保存。
+
+HTML 支持常见静态卡片、表格、图表数据和 SVG 示意图，离线文件不运行交互组件。复杂或无法识别的内容会保留文字说明，不能保证与原页面完全一致。
+
+支持 PNG、JPEG、WebP、GIF 和 AVIF，单张图片上限 5 MB。图片过大或无法读取时保留说明，正文仍可保存。
 
 插件依赖 ChatGPT 网页内部接口，网页变化可能影响使用。不支持临时对话、分享页面及尚未保存的对话。
 
 对话处理在本地完成，不上传到第三方，也不保存登录令牌。扩展只记住浮窗位置、开关和导出格式。[隐私说明](docs/privacy.md)
-
-## 开发
-
-需要 Node.js 22.12+：
-
-```sh
-npm ci
-npm test
-npm run build
-```
-
-构建后加载 `dist`。浏览器测试使用隔离环境和模拟对话：
-
-```sh
-npx playwright install chromium
-npm run test:e2e
-npm run test:floating
-```
 
 第三方依赖许可见安装包中的 `THIRD_PARTY_NOTICES.txt`。
 

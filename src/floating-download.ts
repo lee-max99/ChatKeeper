@@ -1,5 +1,6 @@
 import { renderHtml, renderMarkdown, safeFilename } from './exporters';
 import { saveDownload } from './download-client';
+import { fetchExportImages } from './image-fetch';
 import type { Conversation, ExportJob, PageInfo } from './types';
 
 function errorText(error: unknown, fallback: string): string {
@@ -17,6 +18,7 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
   const status = root.getElementById('download-status')!;
   const retry = root.getElementById('download-retry') as HTMLButtonElement | null;
   let busy = false; let run = 0; let timer: ReturnType<typeof setTimeout> | undefined;
+  let imagesController: AbortController | undefined;
   let operation: 'outline' | 'download' | undefined;
   let exportData: ((data: Conversation) => Conversation) | undefined;
   let label = '下载'; let unavailable = false;
@@ -46,7 +48,9 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
       request('CK_CHECK'); ready(job.data);
       if (operation === 'outline') { setBusy(false); message(''); return; }
       const selected = format.value === 'html' ? 'html' : 'md';
-      const data = { ...(exportData ? exportData(job.data) : job.data), exportedAt: new Date().toISOString() };
+      imagesController = new AbortController();
+      const data = await fetchExportImages({ ...(exportData ? exportData(job.data) : job.data), exportedAt: new Date().toISOString() }, () => token === run && location.href === url, message, imagesController.signal);
+      imagesController = undefined;
       const content = selected === 'html' ? renderHtml(data) : renderMarkdown(data);
       request('CK_CHECK');
       if (token !== run || location.href !== url) return;
@@ -55,7 +59,7 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
       const result = await saveDownload({ type: 'DOWNLOAD', format: selected,
         filename: safeFilename(`${data.title}_${new Date().toLocaleDateString('sv-SE')}`, selected), content }, message, () => token === run && location.href === url);
       if (token !== run || location.href !== url) return;
-      setBusy(false); message(result);
+      setBusy(false); message(result + (data.warnings.find(warning => /张图片未能保存/.test(warning)) ? '；部分图片未保存，详情见导出文件。' : ''));
     } catch (error) {
       if (token !== run || location.href !== url) return;
       setBusy(false); lifecycle.failed?.(error); message(errorText(error, '导出失败，请重试。'), true);
@@ -91,12 +95,16 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
   retry?.addEventListener('click', () => start(operation || 'download'));
   button.addEventListener('click', () => start('download'));
   read.addEventListener('click', () => start('outline'));
-  cancel.addEventListener('click', () => { bridge('CK_CANCEL'); cancel.disabled = true; message('正在取消…'); });
+  cancel.addEventListener('click', () => {
+    if (imagesController) { imagesController.abort(); imagesController = undefined; run++; clearTimeout(timer); setBusy(false); message('导出已取消。'); }
+    bridge('CK_CANCEL'); cancel.disabled = true;
+    if (busy) message('正在取消…');
+  });
   format.addEventListener('change', () => { void chrome.storage.local.set({ floatingFormat: format.value }); });
   void chrome.storage.local.get('floatingFormat').then(values => { if (!busy) format.value = values.floatingFormat === 'html' ? 'html' : 'md'; }).catch(() => {});
   return {
     start, message, get busy() { return busy; }, get downloading() { return busy && operation === 'download'; },
     availability(text: string, disabled: boolean) { label = text; unavailable = disabled; setBusy(busy); },
-    reset() { run++; clearTimeout(timer); operation = undefined; exportData = undefined; setBusy(false); message(''); },
+    reset() { imagesController?.abort(); imagesController = undefined; run++; clearTimeout(timer); operation = undefined; exportData = undefined; setBusy(false); message(''); },
   };
 }

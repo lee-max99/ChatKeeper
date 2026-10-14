@@ -2,11 +2,13 @@ import { readConversation } from './conversation-api';
 import { pageInfo, validatePage } from './page-info';
 import { mountFloating } from './floating';
 import type { ExportJob } from './types';
+import { fetchExportImages } from './image-fetch';
 
 const state = window as Window & { __chatKeeperReaderV3?: boolean };
 if (!state.__chatKeeperReaderV3) {
   state.__chatKeeperReaderV3 = true;
   let controller: AbortController | undefined;
+  let imagesController: AbortController | undefined;
   let job: ExportJob = { ok: true, state: 'idle' };
   let jobUrl = '';
   const cancelPreparation = (error: string): void => {
@@ -15,7 +17,7 @@ if (!state.__chatKeeperReaderV3) {
     job = { ok: true, state: 'error', error };
   };
   const request = (type: string): unknown => {
-    if (type === 'CK_CANCEL') { cancelPreparation('导出已取消。'); return { ok: true }; }
+    if (type === 'CK_CANCEL') { imagesController?.abort(); cancelPreparation('导出已取消。'); return { ok: true }; }
     if (type === 'CK_STATUS') {
       if (jobUrl && jobUrl !== location.href) {
         cancelPreparation('对话已切换，请重新打开 ChatKeeper。');
@@ -47,6 +49,16 @@ if (!state.__chatKeeperReaderV3) {
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
   };
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
+    if (sender.id === chrome.runtime.id && message?.type === 'CK_IMAGES') {
+      const data = job.data; const url = location.href;
+      if (!data || data.url !== url || !Array.isArray(message.ids) || !message.ids.length || message.ids.some((id: unknown) => typeof id !== 'string' || !data.messages.some(item => item.id === id))) {
+        respond({ok:false,error:'对话已变化，请重新导出。'}); return false;
+      }
+      const selected = {...data, messages:data.messages.filter(item => message.ids.includes(item.id))};
+      imagesController?.abort(); const active = new AbortController(); imagesController = active;
+      void fetchExportImages(selected, () => location.href === url && job.data === data, () => {}, active.signal).then(result => respond({ok:true,data:result}), () => respond({ok:false,error:'图片读取已取消或对话已切换。'})).finally(() => {if (imagesController === active) imagesController = undefined;});
+      return true;
+    }
     if (sender.id !== chrome.runtime.id || !['CK_INFO', 'CK_PREPARE', 'CK_STATUS', 'CK_CANCEL', 'CK_CHECK'].includes(message?.type)) return false;
     respond(request(message.type)); return false;
   });

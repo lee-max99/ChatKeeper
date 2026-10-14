@@ -1,6 +1,8 @@
 import type { ChatMessage, Conversation } from './types';
 import { assertChatGPT } from './collector';
 import { matchesMessagePath, uniqueMessageIds } from './message-identity';
+import { describeResource, readableRichText } from './rich-content';
+import { messageImages } from './image-assets';
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : undefined;
@@ -23,7 +25,7 @@ export function conversationId(url: string): string {
   return id;
 }
 
-function messageText(message: RecordValue, warnings: Set<string>): string {
+function messageText(message: RecordValue, warnings: Set<string>, convertUi = true): string {
   const content = record(message.content);
   if (!content) throw new Error('消息正文结构无法识别，未生成文件。');
   const metadata = record(message.metadata);
@@ -33,9 +35,7 @@ function messageText(message: RecordValue, warnings: Set<string>): string {
     if (typeof part === 'string') return part;
     const item = record(part);
     if (typeof item?.text === 'string') return item.text;
-    resourceNotice();
-    const type = String(item?.content_type || '');
-    return `> ${/image/.test(type) ? '图片' : /audio/.test(type) ? '音频' : /video/.test(type) ? '视频' : '非文本内容'}（文件未嵌入）`;
+    return describeResource(item, warnings);
   }).join('\n\n');
   if (Array.isArray(metadata?.attachments)) for (const attachment of metadata.attachments) {
     const item = record(attachment);
@@ -43,13 +43,7 @@ function messageText(message: RecordValue, warnings: Set<string>): string {
     const href = typeof item?.url === 'string' && /^https?:\/\//i.test(item.url) ? item.url : undefined;
     resourceNotice(); text += `\n\n> 附件：${href ? `[${name}](<${href.replace(/[<>\r\n]/g, '')}>)` : name}（文件未嵌入）`;
   }
-  // Resolve citation references when a public URL accompanies their display text.
-  if (Array.isArray(metadata?.content_references)) for (const reference of metadata.content_references) {
-    const item = record(reference);
-    if (typeof item?.matched_text === 'string' && typeof item.url === 'string' && /^https?:\/\//i.test(item.url)) {
-      text = text.split(item.matched_text).join(`[${label(item.title || '参考来源')}](<${item.url.replace(/[<>\r\n]/g, '')}>)`);
-    }
-  }
+  if (record(message.author)?.role === 'assistant') text = readableRichText(text, metadata, warnings, convertUi);
   if (!text.trim()) {
     warnings.add('部分特殊内容仅保留类型说明。');
     text = `> 非文本消息（${label(content.content_type || '未知类型')}）`;
@@ -118,7 +112,10 @@ export function normalizeConversation(raw: unknown, url: string, visibleIds: str
       warnings.add('保存记录中仍有未完成标记，已导出当前保存的内容；部分回答可能尚未完整保存。');
     }
     if (typeof message.id !== 'string') throw new Error('消息标识不完整，未生成文件。');
-    messages.push({ id: message.id, stable: true, role, html: '', markdown: messageText(message, warnings) });
+    const markdown = messageText(message, warnings);
+    const rawText = role === 'assistant' ? messageText(message, new Set(), false) : '';
+    const images = messageImages(message);
+    messages.push({ id: message.id, stable: true, role, html: '', markdown, ...(rawText.includes('<') ? { uiSource: rawText } : {}), ...(images.length ? {images} : {}) });
   }
   if (!messages.length) throw new Error('这条对话没有可以导出的消息。');
   return { title: typeof data.title === 'string' && data.title.trim() ? data.title : 'ChatGPT 对话', url,

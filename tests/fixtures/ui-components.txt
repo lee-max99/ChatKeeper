@@ -1,0 +1,15 @@
+## 组件导出检查
+
+<FuturePanel><UnknownHeading label="设备汇总"/><future-metric padding={2} label="温度" value={23} valueSuffix="°C"/><NovelVisualization content={{"title":"设备列表","items":[{"设备":"A","温度":23},{"设备":"B","温度":24}],"description":"保留这段说明","private_id":"private-hidden"}}/></FuturePanel>
+
+<Tabs><Tab label="方案一"><DataTable columns={[{key:'name',label:'名称'}, {key:'count',label:'数量'},]} rows={[{name:'设备A',count:3},{name:'设备B',count:0}]}/></Tab><Tab label="方案二"><List><ListItem>第一项</ListItem><ListItem>第二项</ListItem></List></Tab></Tabs>
+
+<Stack gap={2}><Link href="https://example.test/docs">文档</Link><Image src="https://example.test/plot.png" alt="分布图"/><Button label="重新计算"/><Input label="人数" value={5}/><Checkbox label="准备完成" checked={true}/><Checkbox label="未完成" checked={false}/><Slider label="进度" value={25} min={0} max={100}/></Stack>
+
+<FutureWidget content={{"private_id":"secret-widget"}}/>
+
+代码示例保持原文：
+
+```jsx
+<Chart content={{"data":[]}}/>
+```

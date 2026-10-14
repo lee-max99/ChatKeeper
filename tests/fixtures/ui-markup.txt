@@ -1,0 +1,22 @@
+## 2. Catch-up：缺少的是一组协作模块
+
+不仅需要复制三个新文件，还要修改现有数据链路。
+
+<box border radius="lg" padding={3} gap={2}>
+  <text color="secondary" weight="medium" size="xs">R70 Catch-up 的实际接入关系</text>
+  <box background="surface-secondary" radius="md" padding={2} align="center">**MeasurementSource: FIFO 128**</box>
+  <row justify="center"><icon name="arrow-down" color="tertiary"/></row>
+  <box background="surface-secondary" radius="md" padding={2} align="center">**Batcher: 3 Records / Batch**</box>
+  <row justify="center"><icon name="arrow-down" color="tertiary"/></row>
+  <box background="surface-secondary" radius="md" padding={2} align="center">**UploadManager: PIPE4 / RETX**</box>
+  <divider color="subtle"/>
+  <box border radius="md" padding={3} gap={2}>
+    **C1：监测三个队列的积压情况**
+
+    <text color="secondary" size="sm">C2：达到阈值后，只清理尚未交给 BLE 的合法可丢弃记录</text>
+
+    <text color="secondary" size="sm">C3：跨 Host/BLE 的完整恢复，当前禁止启用</text>
+  </box>
+</box>
+
+后续正文保持可读。

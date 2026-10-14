@@ -4,6 +4,20 @@ import type { ExportJob } from '../src/types';
 import { selectQuestionGroups } from '../src/conversation-selection';
 
 afterEach(() => { document.body.innerHTML = ''; vi.useRealTimers(); vi.unstubAllGlobals(); });
+it('cancels active image acquisition without starting a download', async () => {
+  const host = document.createElement('div'); document.body.append(host); const root = host.attachShadow({mode:'open'});
+  root.innerHTML = '<select id="download-format"><option value="md">Markdown</option></select><button id="download"></button><button id="read-outline"></button><div><span id="download-status"></span><button id="download-cancel"></button></div>';
+  const send = vi.fn(async () => ({ok:true}));
+  vi.stubGlobal('chrome',{runtime:{sendMessage:send},storage:{local:{get:async () => ({}),set:async () => {}}}});
+  let active: AbortSignal | undefined;
+  vi.stubGlobal('fetch',(_url: string,options:RequestInit) => new Promise((_resolve,reject) => {active = options.signal as AbortSignal;active.addEventListener('abort',() => reject(new Error('aborted')),{once:true});}));
+  const data = {title:'当前会话',url:location.href,exportedAt:'',warnings:[],messages:[{id:'a',stable:true,role:'assistant' as const,html:'',markdown:'正文',images:[{alt:'图',url:'https://images.oaiusercontent.com/picture.png'}]}]};
+  const bridge = (type:string) => type === 'CK_INFO' ? {ok:true,data:{generating:false}} : type === 'CK_STATUS' ? {ok:true,state:'done',data} : {ok:true};
+  const controls = mountFloatingDownload(root,bridge,() => {},() => {}); controls.start('download');
+  await vi.waitFor(() => expect(active).toBeDefined()); (root.getElementById('download-cancel') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(controls.busy).toBe(false)); expect(active!.aborted).toBe(true);
+  expect(send).not.toHaveBeenCalled(); expect(root.getElementById('download-status')!.textContent).toContain('取消'); controls.reset();
+});
 
 it('waits for browser confirmation and reports an interruption instead of claiming a download started', async () => {
   vi.useFakeTimers();
