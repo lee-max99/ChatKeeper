@@ -3,6 +3,15 @@ import { renderHtml } from '../src/exporters';
 import readerScript from '../src/reader.js?raw';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+it('keeps SVG labels intact during search and reveals matching chart data', async () => {
+  vi.useFakeTimers();vi.stubGlobal('matchMedia',() => ({matches:false,addEventListener(){}}));
+  const output = renderHtml({title:'图表搜索',url:'https://chatgpt.com/c/one',exportedAt:'2026-10-17',warnings:[],messages:[{id:'a',role:'assistant',stable:true,html:'<svg viewBox="0 0 100 100"><text x="0" y="20">泵组故障</text></svg><details><summary>查看数据</summary><p>泵组故障 26</p></details>'}]});
+  document.body.innerHTML = new DOMParser().parseFromString(output,'text/html').body.innerHTML;
+  document.querySelectorAll<HTMLElement>('article').forEach(node => {node.scrollIntoView = () => {};});new Function(readerScript)();
+  const input = document.querySelector<HTMLInputElement>('#reader-search')!;input.value = '泵组故障';input.dispatchEvent(new Event('input'));await vi.advanceTimersByTimeAsync(130);
+  expect(document.querySelector('svg mark')).toBeNull();expect(document.querySelector('details')?.open).toBe(true);
+  document.getElementById('clear-search')!.click();expect(document.querySelector('details')?.open).toBe(false);
+});
 
 it('provides safe, distinct outline anchors for repeated questions', () => {
   const output = renderHtml({ title: '阅读测试', url: 'https://chatgpt.com/c/one', exportedAt: '2026-09-22', warnings: [], messages: [

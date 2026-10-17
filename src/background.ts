@@ -21,13 +21,13 @@ chrome.runtime.onMessage.addListener((request, sender, respond) => {
   if (request.type === 'DOWNLOAD_STATUS') {
     if (!Number.isInteger(request.id) || request.id < 0) { respond({ ok: false, error: '无效的下载任务。' }); return false; }
     void chrome.downloads.search({ id: request.id }).then(([item]) => {
-      if (!item || item.byExtensionId !== chrome.runtime.id) { respond({ ok: false, error: '未找到本次下载记录，无法确认文件已保存。请按 Ctrl+J 查看下载列表。' }); return; }
+      if (!item || item.byExtensionId !== chrome.runtime.id) { respond({ ok: false, unconfirmed:true, error: '未找到本次下载记录，无法确认文件已保存。请按 Ctrl+J 查看下载列表。' }); return; }
       if (item.state === 'interrupted') { respond({ ok: false, error: interruption(item.error) }); return; }
       if (item.state === 'complete' && item.exists === false) { respond({ ok: false, error: '下载记录显示文件已被移除，请重新导出。' }); return; }
       const review = item.danger && !['safe', 'accepted', 'allowlistedByPolicy', 'deepScannedSafe'].includes(item.danger);
       respond({ ok: true, state: item.state, filename: item.filename.split(/[\\/]/).pop(),
         message: item.paused ? '下载已暂停，请按 Ctrl+J 查看并继续。' : review ? '浏览器正在检查或等待处理此文件，请按 Ctrl+J 查看。' : '正在等待浏览器保存…若未弹出窗口，请按 Ctrl+J 查看。' });
-    }, error => respond({ ok: false, error: `无法确认保存结果：${String(error?.message || error)}。请按 Ctrl+J 查看下载列表。` }));
+    }, error => respond({ ok: false, unconfirmed:true, error: `无法确认保存结果：${String(error?.message || error)}。请按 Ctrl+J 查看下载列表。` }));
     return true;
   }
   if (typeof request.content !== 'string' || !request.content.trim() || request.content.length > 25_000_000 ||

@@ -1,7 +1,7 @@
 import './popup.css';
 import { assertChatGPT } from './collector';
 import { renderHtml, renderMarkdown, safeFilename } from './exporters';
-import { saveDownload } from './download-client';
+import { saveDownload,downloadSummary } from './download-client';
 import type { ExportJob, PageInfo } from './types';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -16,6 +16,7 @@ let info: PageInfo | undefined;
 let busy = false;
 let downloadWhenReady = false;
 let polling: ReturnType<typeof setTimeout> | undefined;
+let phase = '读取记录…';
 
 function format(): 'md' | 'html' { return document.querySelector<HTMLInputElement>('input[name="format"]:checked')?.value === 'html' ? 'html' : 'md'; }
 function setStatus(message: string, error = false): void { status.textContent = message; status.className = error ? 'error' : busy ? 'busy' : ''; status.parentElement!.hidden = !message; }
@@ -24,7 +25,7 @@ function setBusy(value: boolean, cancellable = false): void {
   title.disabled = value || !info; cancel.hidden = !cancellable; cancel.disabled = false;
   element('progress').hidden = !value;
   document.querySelectorAll<HTMLInputElement>('input[name="format"]').forEach(input => { input.disabled = value; });
-  save.textContent = value ? '正在准备…' : '导出';
+  save.textContent = value ? phase : '导出全部';
 }
 async function request<T>(type: string): Promise<T> {
   const result = await chrome.tabs.sendMessage(tabId!, { type });
@@ -39,7 +40,7 @@ async function poll(): Promise<void> {
   try {
     const job = await request<ExportJob>('CK_STATUS');
     if (job.state === 'running') {
-      setBusy(true, true); setStatus('正在准备对话…');
+      phase = '读取记录…';setBusy(true, true); setStatus('正在读取聊天记录…');
       polling = setTimeout(() => void poll(), 250); return;
     }
     if (job.state === 'error') throw new Error(job.error || '读取失败，请重试。');
@@ -48,32 +49,33 @@ async function poll(): Promise<void> {
     if (!downloadWhenReady) { setBusy(false); setStatus('对话已准备好'); return; }
     downloadWhenReady = false;
     await request('CK_CHECK');
-    setBusy(true); setStatus('正在生成文件…');
+    phase = '生成文件…';setBusy(true); setStatus('正在生成导出文件…');
     let data = { ...job.data, title: title.value.trim() || job.data.title, exportedAt: new Date().toISOString() };
     if (data.messages.some(message => message.images?.length)) {
-      setBusy(true,true); setStatus('正在保存图片…');
+      phase = '保存图片…';setBusy(true,true); setStatus('正在保存聊天图片…');
       const result = await chrome.tabs.sendMessage(tabId!, {type:'CK_IMAGES',ids:data.messages.map(message => message.id)});
       if (!result?.ok || !result.data) throw new Error(result?.error || '图片读取失败，请重试。');
       data = {...data,messages:result.data.messages,warnings:result.data.warnings};
     }
+    phase = '生成文件…';setBusy(true);setStatus('正在生成导出文件…');
     const selected = format();
     const content = selected === 'md' ? renderMarkdown(data) : renderHtml(data);
     // Recheck after conversion as a long document may take time to format.
     await request('CK_CHECK');
-    save.textContent = '等待保存…';
+    phase = '等待保存…';setBusy(true);
     const result = await saveDownload({ type: 'DOWNLOAD', format: selected,
       filename: safeFilename(`${data.title}_${new Date().toLocaleDateString('sv-SE')}`, selected), content,
     }, setStatus);
-    setBusy(false); setStatus(result + (data.warnings.find(warning => /张图片未能保存/.test(warning)) ? '；部分图片未保存，详情见导出文件。' : ''));
+    setBusy(false); setStatus(downloadSummary(result,data));
   } catch (error) { fail(error); }
 }
 async function startExport(): Promise<void> {
   if (busy || !info) return;
-  downloadWhenReady = true; setBusy(true, true); setStatus('正在准备对话…');
+  downloadWhenReady = true;phase = '读取记录…'; setBusy(true, true); setStatus('正在读取聊天记录…');
   try { await request('CK_PREPARE'); await poll(); } catch (error) { fail(error); }
 }
 async function initialize(): Promise<void> {
-  clearTimeout(polling); setBusy(true); setStatus('正在读取对话信息…');
+  clearTimeout(polling);phase = '读取记录…';setBusy(true); setStatus('正在读取对话信息…');
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !tab.url) throw new Error('请在 ChatGPT 对话页打开 ChatKeeper。');

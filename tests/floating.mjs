@@ -88,7 +88,7 @@ try {
   const browserCdp = await context.browser().newBrowserCDPSession();
   await browserCdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: resolve('artifacts/downloads'), eventsEnabled: true });
   await page.goto('https://chatgpt.com/c/first');
-  const widget = page.locator('#chatkeeper-widget'); const items = widget.locator('#questions button');
+  const widget = page.locator('#chatkeeper-widget'); const items = widget.locator('#questions .question-button');
   await widget.waitFor({ timeout: 4000 });
   assert.equal(await widget.locator('#launcher').isVisible(), true);
   assert.equal(await widget.locator('#panel').isVisible(), false);
@@ -106,6 +106,7 @@ try {
   assert.deepEqual(await items.locator('.question-text').allTextContents(), prompts);
   assert.equal(await widget.locator('#export, input[name="format"]').count(), 0);
   assert.equal(await widget.locator('#download').isVisible(), true);
+  assert.equal(await widget.locator('#download').textContent(), '导出全部');
   await page.locator('body > header').click();
   assert.equal(await widget.locator('#panel').isVisible(), true);
   await page.screenshot({ path: 'artifacts/floating-panel.png' });
@@ -113,15 +114,16 @@ try {
   results.push('Floating panel retains the question outline and provides a compact download footer.');
 
   await items.nth(2).click();
+  assert.ok(await page.locator('[data-testid="conversation-turn-4"]').evaluate(node => node.getAnimations().length > 0), 'The actual target is briefly highlighted');
   await page.waitForFunction(() => {
     const top = document.querySelector('[data-testid="conversation-turn-4"]').getBoundingClientRect().top;
     return top >= 70 && top < 100;
   });
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button')[2].getAttribute('aria-current') === 'location');
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button')[2].getAttribute('aria-current') === 'location');
   assert.equal(await page.locator('main').evaluate(node => node.scrollTop > 300), true);
   assert.equal(await page.locator('[data-testid="conversation-turn-4"]').evaluate(node => node.style.scrollMarginTop), '');
   await page.locator('main').evaluate(node => { node.scrollTop = 0; });
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#questions button').getAttribute('aria-current') === 'location');
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#questions .question-button').getAttribute('aria-current') === 'location');
   results.push('Clicking a question scrolls the nested chat container to that turn; reading highlight follows manual scrolling.');
 
   await items.nth(1).focus();
@@ -129,7 +131,7 @@ try {
     const article = document.createElement('article'); article.dataset.testid = 'conversation-turn-8';
     article.innerHTML = '<div data-message-author-role="user">新增的提问</div>'; document.querySelector('main').append(article);
   });
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 5);
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 5);
   assert.equal(await items.nth(1).evaluate(node => node.getRootNode().activeElement === node), true, 'Adding a prompt must preserve keyboard focus on the same question');
   await items.nth(4).focus();
   await page.evaluate(() => { document.querySelector('[data-testid="conversation-turn-8"] [data-message-author-role]').firstChild.textContent = '编辑后的提问'; });
@@ -148,7 +150,7 @@ try {
   await page.evaluate(() => {
     document.querySelector('main').innerHTML = '<article data-testid="conversation-turn-0" data-turn="user"><h5 class="sr-only">You said:</h5><div class="whitespace-pre-wrap">新会话的提问</div></article><article data-testid="conversation-turn-1" data-turn="assistant">回答</article>';
   });
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 1);
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 1);
   assert.deepEqual(await items.locator('.question-text').allTextContents(), ['新会话的提问']);
   assert.equal(await widget.locator('#panel').isVisible(), true);
   await items.first().focus(); await pause(1200);
@@ -164,7 +166,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#title').textContent === '复用节点的会话');
   assert.equal(await items.count(), 0);
   await page.evaluate(() => { document.querySelector('.whitespace-pre-wrap').setAttribute('data-message-id', 'new-question'); });
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 1);
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 1);
   assert.deepEqual(await items.locator('.question-text').allTextContents(), ['新会话的提问']);
   results.push('Reused DOM nodes with identical prompt text are recognized as new when their available message identity changes.');
   await page.evaluate(() => { document.querySelector('.whitespace-pre-wrap').removeAttribute('data-message-id'); });
@@ -173,12 +175,12 @@ try {
   await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#title').textContent === '无标识会话');
   assert.equal(await items.count(), 0);
   await page.evaluate(() => { document.querySelector('.whitespace-pre-wrap').firstChild.textContent = '不需要 ID 的新提问'; });
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#questions button')?.textContent.includes('不需要 ID 的新提问'));
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#questions .question-button')?.textContent.includes('不需要 ID 的新提问'));
   results.push('ID-less accessibility-heading turns recover after in-place prompt text changes during navigation.');
   await page.evaluate(() => { history.pushState({}, '', '/c/second'); document.title = '返回之前的会话 - ChatGPT'; });
   await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#title').textContent === '返回之前的会话');
   await page.evaluate(() => { document.querySelector('.whitespace-pre-wrap').firstChild.textContent = '新会话的提问'; });
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#questions button')?.textContent.includes('新会话的提问'), undefined, { timeout: 3000 });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#questions .question-button')?.textContent.includes('新会话的提问'), undefined, { timeout: 3000 });
   results.push('Returning to an earlier conversation using the same DOM node restores its prompt instead of excluding an old snapshot forever.');
 
   const header = await widget.locator('#drag-handle').boundingBox(); const beforeDrag = await widget.boundingBox();
@@ -191,7 +193,7 @@ try {
   await widget.locator('#launcher').waitFor({ state: 'visible' });
   assert.equal(await widget.locator('#panel').isVisible(), false);
   await widget.locator('#launcher').click();
-  await page.waitForFunction(() => document.querySelector("#chatkeeper-widget").shadowRoot.querySelectorAll("#questions button").length === 4);
+  await page.waitForFunction(() => document.querySelector("#chatkeeper-widget").shadowRoot.querySelectorAll("#questions .question-button").length === 4);
   const restored = await widget.boundingBox();
   assert.equal(Math.abs(restored.x - afterDrag.x) < 3 && Math.abs(restored.y - Math.min(afterDrag.y, 720 - restored.height - 12)) < 3, true);
   results.push('Dragging, keyboard reopening, and persisted position work; reload starts collapsed.');
@@ -209,10 +211,10 @@ try {
   results.push('Disabled outline does no scans; narrow viewport remains accessible; only UI preferences are stored and no API is requested.');
 
   await page.evaluate(() => { document.querySelector('main').innerHTML = '<p>尚未加载的会话</p>'; });
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 0);
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 0);
   assert.equal(await widget.locator('#empty').isVisible(), true);
   await page.evaluate(() => { document.querySelector('main').innerHTML = '<article data-testid="conversation-turn-0"><div data-message-author-role="user">&lt;img src=x onerror=alert(1)&gt;</div></article>'; });
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 1);
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 1);
   assert.equal(await items.locator('img').count(), 0);
   assert.match(await items.first().textContent(), /<img src=x/);
   results.push('Unloaded-page empty state recovers automatically and question text cannot inject markup.');
@@ -244,13 +246,14 @@ try {
     history.pushState({}, '', '/g/g-p-project/c/project-thread'); document.title = '分支 · 项目会话 - ChatGPT';
     document.querySelector('main').innerHTML = '<p id="plain-q1">页面中的问题</p><div style="height:500px">回答内容</div><p id="plain-q2">重复提问</p><div style="height:500px">第二个回答</div><p id="plain-q3">重复提问</p><div style="height:600px">第三个回答</div>';
   });
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 4 && document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#questions button')?.textContent.includes('页面中的问题'), undefined, { timeout: 3000 });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 4 && document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#questions .question-button')?.textContent.includes('页面中的问题'), undefined, { timeout: 3000 });
   assert.deepEqual(await items.locator('.question-text').allTextContents(), apiPrompts);
   await items.nth(2).click();
   await page.waitForFunction(() => { const top = document.querySelector('#plain-q3').getBoundingClientRect().top; return top >= 70 && top < 100; });
   await items.nth(3).click();
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#download-status').textContent.includes('无法定位'));
-  assert.match(await widget.locator('#download-status').textContent(), /无法定位/);
+  await page.waitForFunction(() => [...document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('.question-status')].some(node => node.textContent.includes('无法定位')));
+  assert.match((await widget.locator('.question-status').allTextContents()).join(''), /无法定位/);
+  assert.doesNotMatch(await widget.locator('#download-status').textContent(), /无法定位/);
   await items.nth(1).focus();
   await page.evaluate(() => document.querySelector('#plain-q3').insertAdjacentHTML('afterend', '<div>页面状态更新</div>'));
   await pause(250);
@@ -260,7 +263,7 @@ try {
   const beforeOutlineUpdate = requests.length;
   apiPrompts.push('后来新增的问题');
   await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<p id="plain-q4">后来新增的问题</p>'));
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 5, undefined, { timeout: 6000 });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 5, undefined, { timeout: 6000 });
   assert.deepEqual(await items.locator('.question-text').allTextContents(), apiPrompts);
   assert.ok(requests.length > beforeOutlineUpdate, 'Changed unmarked content must refresh saved records');
   apiPrompts[0] = '编辑后的保存提问';
@@ -278,13 +281,13 @@ try {
   await pageCdp.send('Runtime.evaluate', { contextId: contentContext, expression: "document.querySelector('#plain-q4').scrollIntoView = () => { document.documentElement.dataset.outlineJumped = 'yes'; }; document.documentElement.dataset.outlineJumped = 'no';" });
   await page.evaluate(() => {
     document.querySelector('#plain-q4').setAttribute('data-message-role', 'assistant');
-    document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button')[4].click();
+    document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button')[4].click();
   });
   assert.equal(await page.evaluate(() => document.documentElement.dataset.outlineJumped), 'no', 'Changed assistant roles must immediately invalidate old question targets');
   await pause(300);
   await page.evaluate(() => {
     document.querySelector('#plain-q4').setAttribute('data-message-role', 'user');
-    document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button')[4].click();
+    document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button')[4].click();
   });
   assert.equal(await page.evaluate(() => document.documentElement.dataset.outlineJumped), 'yes');
   results.push('Role marker changes refresh saved-directory targets without replacing its full history.');
@@ -295,7 +298,7 @@ try {
   await pause(1800);
   assert.equal(requests.length, beforeStreaming, 'Saved outline refresh must wait until generation ends');
   await page.evaluate(() => document.querySelector('[data-testid="stop-button"]').remove());
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 6, undefined, { timeout: 6000 });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 6, undefined, { timeout: 6000 });
   results.push('Saved outline waits during generation and refreshes once the response finishes.');
 
   const backendReads = () => requests.filter(path => path.startsWith('/backend-api/conversation/')).length;
@@ -307,7 +310,7 @@ try {
   await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<p>延迟保存的提问</p>'));
   await waitForBackendRead(beforeLaggedSave);
   apiPrompts.push('延迟保存的提问');
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 7, undefined, { timeout: 6000 });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 7, undefined, { timeout: 6000 });
   assert.equal(backendReads() - beforeLaggedSave, 2, 'An unchanged saved snapshot permits one bounded follow-up read');
   results.push('One bounded follow-up read recovers a question that reaches saved records after the initial refresh.');
 
@@ -318,9 +321,10 @@ try {
   await waitForBackendRead(beforeInFlightChange);
   apiPrompts.push('读取过程中的新提问');
   await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<p>读取过程中的新提问</p>'));
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 9, undefined, { timeout: 7000 });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 9, undefined, { timeout: 7000 });
   assert.deepEqual(await items.locator('.question-text').allTextContents(), apiPrompts);
   delay = 0;
+  assert.equal(await widget.locator('#range-from').isVisible(), false, 'Range inputs stay out of the normal selection flow');
   results.push('Changes arriving while saved records are being read remain queued and update the complete directory afterward.');
   delay = 700;
   const beforeGenerationRace = backendReads();
@@ -331,7 +335,7 @@ try {
   await page.evaluate(() => document.querySelector('main').insertAdjacentHTML('beforeend', '<button data-testid="stop-button">停止</button><p>读取期间生成的新问题</p>'));
   await pause(1100);
   await page.evaluate(() => document.querySelector('[data-testid="stop-button"]').remove());
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 11, undefined, { timeout: 6000 });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 11, undefined, { timeout: 6000 });
   delay = 0;
   results.push('Generation starting during a read defers the rejected refresh and resumes it after generation ends without losing new questions.');
   delay = 3000;
@@ -356,12 +360,12 @@ try {
   assert.equal(await items.count(), 0, 'Old recognized user nodes must remain hidden while the new conversation loads');
   const sharedHistoryMarkdown = await download('md');
   assert.match(sharedHistoryMarkdown, /新会话的追加提问/);
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 12, undefined, { timeout: 6000 });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 12, undefined, { timeout: 6000 });
   assert.deepEqual(await items.locator('.question-text').allTextContents(), apiPrompts, 'API-confirmed history shared with the previous page must stay in the new directory');
   results.push('A new conversation retaining common historical questions displays its entire confirmed saved path without dropping shared entries.');
   apiPrompts = ['切换回答后保留的问题', '新的后续问题'];
   await page.evaluate(() => { document.querySelector('main').innerHTML = '<p>切换回答后保留的问题</p><p>新的后续问题</p>'; });
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions button').length === 2, undefined, { timeout: 6000 });
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 2, undefined, { timeout: 6000 });
   assert.deepEqual(await items.locator('.question-text').allTextContents(), apiPrompts);
   results.push('A refreshed saved path replaces obsolete questions after editing or changing the current branch instead of accumulating old paths.');
   delay = 1200;
@@ -401,7 +405,10 @@ try {
   delay = 0;
   await widget.locator('#questions input[type=checkbox]').nth(3).check();
   await widget.locator('#questions input[type=checkbox]').nth(0).check();
-  assert.equal(await widget.locator('#download').textContent(), '导出所选（2）');
+  assert.equal(await widget.locator('#download').textContent(), '导出所选 · 2 组');
+  await widget.locator('.question-jump').first().click();
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions input:checked').length === 2);
+  assert.equal(await widget.locator('#questions input:checked').count(), 2, 'Jumping while selecting never toggles a choice');
   await widget.screenshot({ path: 'artifacts/floating-selection-detail.png' });
   const selectedMarkdown = await download('md');
   assert.match(selectedMarkdown, /选择测试：第一个问题/); assert.match(selectedMarkdown, /选择测试：未加载的历史问题/);
@@ -418,16 +425,19 @@ try {
   await widget.locator('#questions input[type=checkbox]').nth(1).check();
   const duplicateMarkdown = await download('md'); assert.match(duplicateMarkdown, /回答 1/); assert.doesNotMatch(duplicateMarkdown, /回答 2/);
   await widget.locator('#select-mode').click();
-  assert.equal(await widget.locator('#questions input[type=checkbox]').count(), 0); assert.equal(await widget.locator('#download').textContent(), '下载');
+  assert.equal(await widget.locator('#questions input[type=checkbox]').count(), 0); assert.equal(await widget.locator('#download').textContent(), '导出全部');
   const fullAfterSelection = await download('md'); assert.match(fullAfterSelection, /选择测试：最后一个问题/);
+  const readsBeforeReturning = requests.length;
   await widget.locator('#select-mode').click(); await widget.locator('#questions input[type=checkbox]').first().waitFor();
+  assert.equal(await widget.locator('#questions input[type=checkbox]').nth(1).isChecked(), true, 'Exiting selection preserves the prior choice');
+  assert.equal(requests.length, readsBeforeReturning, 'Returning to an unchanged selection reuses the loaded directory');
   await widget.locator('#questions input[type=checkbox]').first().check();
   await page.evaluate(() => { history.pushState({}, '', '/c/selection-next'); document.title = '选择后切换 - ChatGPT'; document.querySelector('main').innerHTML = '<p>下一个会话</p>'; });
   await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#title').textContent === '选择后切换');
-  assert.equal(await widget.locator('#select-mode').textContent(), '选择'); assert.equal(await widget.locator('#questions input[type=checkbox]').count(), 0);
+  assert.equal(await widget.locator('#select-mode').textContent(), '选择问答'); assert.equal(await widget.locator('#questions input[type=checkbox]').count(), 0);
   const storedAfterSelection = await worker.evaluate(() => chrome.storage.local.get(null));
   assert.ok(Object.keys(storedAfterSelection).every(key => ['floatingEnabled', 'floatingPosition', 'floatingFormat'].includes(key)));
-  results.push('Q&A selection loads complete saved history, exports only noncontiguous groups in Markdown/HTML, separates duplicate prompts, supports all/clear, and resets on exit/navigation without persisting selections.');
+  results.push('Q&A selection loads complete saved history, exports only noncontiguous groups in Markdown/HTML, separates duplicate prompts, supports all/clear, retains choices across exit/re-entry, and resets on navigation without persisting selections.');
   apiPrompts = ['第一行\n第二行', '仍未加载的历史提问'];
   await page.evaluate(() => {
     document.querySelector('main').innerHTML = '<div style="height:1200px">前面的内容</div><article id="loaded-multiline" data-testid="conversation-turn-0"><div data-message-author-role="user"><h5 class="sr-only" hidden>You said:</h5>第一行<br>第二行<button>编辑</button></div></article><div style="height:900px">后面的内容</div>';
@@ -442,8 +452,8 @@ try {
   await page.waitForFunction(() => { const top = document.querySelector('#loaded-multiline').getBoundingClientRect().top; return top >= 70 && top < 100; });
   assert.doesNotMatch(await widget.locator('#download-status').textContent(), /无法定位/);
   await items.nth(1).click();
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#download-status').textContent.includes('无法定位'));
-  assert.match(await widget.locator('#download-status').textContent(), /无法定位.*下载不受影响/);
+  await page.waitForFunction(() => [...document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('.question-status')].some(node => node.textContent.includes('无法定位')));
+  assert.match((await widget.locator('.question-status').allTextContents()).join(''), /无法定位/);
   const despiteUnloaded = await download('md'); assert.match(despiteUnloaded, /仍未加载的历史提问/);
   results.push('Loaded multiline prompts with br/controls navigate from the saved outline; genuinely absent history has an accurate navigation hint and still downloads completely.');
   await browserCdp.send('Browser.setDownloadBehavior', { behavior: 'deny' });
@@ -461,12 +471,22 @@ try {
     main.innerHTML = '<div style="height:2400px"></div><article data-testid="conversation-turn-2"><div data-message-author-role="user" data-message-id="u1">当前末尾提问</div></article><div style="height:800px"></div>';
     main.scrollTop = 2000;
   });
-  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#questions button')?.textContent.includes('当前末尾提问'));
+  await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelector('#questions .question-button')?.textContent.includes('当前末尾提问'));
   await widget.locator('#select-mode').click();
   await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions input').length === 2);
-  await widget.locator('#select-mode').click();
+  await widget.locator('#questions input[type=checkbox]').last().check();
+  await widget.locator('.question-jump').first().click();await pause(180);await page.keyboard.press('Escape');
+  const stoppedTop = await page.locator('main').evaluate(node => node.scrollTop);await pause(400);
+  assert.ok(Math.abs(await page.locator('main').evaluate(node => node.scrollTop) - stoppedTop) < 2,'Escape stops the animation without later scroll writes');
+  assert.match(await widget.locator('.question-status').first().textContent(),/已停止定位/);
+  await widget.locator('.question-jump').last().click();
+  await page.waitForFunction(() => {const top = document.querySelector('[data-message-id="u1"]').closest('article').getBoundingClientRect().top;return top >= 70 && top < 110;});
+  await page.locator('main').evaluate(node => {node.scrollTop = 2000;});
+  results.push('Escape stops history-loading motion and a new loaded-target jump remains free of old scroll commands.');
   await page.evaluate(() => {
     const main = document.querySelector('main');
+    window.__navigationMotion = [main.scrollTop];
+    const record = () => {if (document.querySelector('#auto-loaded-question')) return;window.__navigationMotion.push(main.scrollTop);requestAnimationFrame(record);};requestAnimationFrame(record);
     const load = () => {
       if (main.scrollTop > 1700) return;
       main.removeEventListener('scroll', load);
@@ -474,23 +494,42 @@ try {
     };
     main.addEventListener('scroll', load);
   });
-  await items.first().click();
+  await widget.locator('.question-jump').first().click();
+  await widget.locator('.question-status').first().waitFor({state:'visible'});
+  assert.match(await widget.locator('.question-status').first().textContent(), /正在加载/);
+  assert.equal(await widget.locator('#download-status').textContent(), '');
   await page.waitForFunction(() => { const node = document.querySelector('#auto-loaded-question'); const top = node?.getBoundingClientRect().top; return top >= 70 && top < 110; });
   assert.equal(await widget.locator('#download-status').textContent(), '');
-  results.push('An unloaded historical prompt automatically mounts after chat-container scrolling and the directory jumps to its actual turn.');
+  assert.equal(await widget.locator('.question-jump').first().evaluate(node => node.getRootNode().activeElement === node),true,'Loading and rebuilding the directory preserves keyboard focus on the same jump control');
+  assert.equal(await widget.locator('#questions input:checked').count(),1,'Locating an unloaded prompt preserves the chosen group');
+  const motion = await page.evaluate(() => {
+    const positions = window.__navigationMotion;return {distinct:new Set(positions).size,maxDelta:Math.max(0,...positions.slice(1).map((value,i) => Math.abs(value - positions[i]))),height:document.querySelector('main').clientHeight};
+  });
+  assert.ok(motion.distinct > 10,'Autoload moves continuously across frames instead of a few large jumps');
+  assert.ok(motion.maxDelta < motion.height * .25,'No large hard jump before historical content mounts');
+  await widget.locator('#select-mode').click();
+  results.push('An unloaded historical prompt automatically mounts after chat-container scrolling; the selection-mode jump preserves focus and selected Q&A.');
   const readsBeforeSelection = requests.length;
   await widget.locator('#select-mode').click();
   assert.equal(await widget.locator('#questions input').count(), 2);
   assert.equal(requests.length, readsBeforeSelection, 'Cached selection must not read the conversation again');
+  assert.equal(await widget.locator('#range-from').isVisible(), false);
   await widget.locator('#question-search').fill('历史');
   assert.equal(await widget.locator('#questions li:visible').count(), 1);
+  await widget.locator('#selection-range summary').click();
+  assert.equal(await widget.locator('#range-from').isVisible(), true);
   await widget.locator('#range-from').fill('1'); await widget.locator('#range-to').fill('2');
   await widget.locator('#select-range').click();
-  assert.match(await widget.locator('#selected-count').textContent(), /2 \/ 2/);
+  assert.match(await widget.locator('#selected-count').textContent(), /已选 2 组问答/);
   await widget.locator('#question-search').fill('没有这个提问');
   assert.equal(await widget.locator('#search-empty').isVisible(), true);
   await widget.locator('#question-search').fill('');
   const rangeExport = await download('md'); assert.match(rangeExport, /自动加载的历史提问/); assert.match(rangeExport, /当前末尾提问/);
+  await widget.screenshot({path:'artifacts/floating-range-0.7.4.png'});
+  await page.setViewportSize({width:360,height:720});
+  assert.ok(await widget.locator('#download').isVisible());
+  assert.ok((await widget.boundingBox()).width <= 336);
+  await widget.screenshot({path:'artifacts/floating-selection-mobile-0.7.4.png'});
   results.push('Cached selection opens without another API read; search filters rows without changing selections, and range selection exports the intended groups.');
   assert.deepEqual(errors, []);
   await writeFile('artifacts/floating-report.json', JSON.stringify({ status: 'passed', fixtureOnly: true, results, errors }, null, 2));

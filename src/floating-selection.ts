@@ -11,6 +11,7 @@ export function mountFloatingSelection(root: ShadowRoot, controls: {
   const count = root.getElementById('selected-count')!;
   const all = root.getElementById('select-all') as HTMLButtonElement;
   const clear = root.getElementById('clear-selection') as HTMLButtonElement;
+  const ranges = root.getElementById('selection-range') as HTMLDetailsElement | null;
   let active = false; let ready = false;
   let questions: ChatMessage[] = [];
   const chosen = new Map<string, ChatMessage>();
@@ -18,17 +19,18 @@ export function mountFloatingSelection(root: ShadowRoot, controls: {
     mode.disabled = controls.downloading();
     all.disabled = !ready || !questions.length || controls.downloading();
     clear.disabled = !chosen.size || controls.downloading();
+    root.querySelectorAll<HTMLInputElement | HTMLButtonElement>('#range-from, #range-to, #select-range').forEach(input => {input.disabled = !ready || controls.downloading();});
     root.querySelectorAll<HTMLInputElement>('#questions input[type=checkbox]').forEach(input => {
       input.checked = chosen.has(input.value); input.disabled = controls.downloading();
     });
     if (active) root.querySelectorAll<HTMLButtonElement>('#questions button').forEach(button => { button.disabled = controls.downloading(); });
   }
   function update(): void {
-    mode.textContent = active ? '完成' : '选择'; mode.setAttribute('aria-pressed', String(active));
+    mode.textContent = active ? '退出选择' : chosen.size ? `选择问答 · ${chosen.size}` : '选择问答'; mode.setAttribute('aria-pressed', String(active));
     tools.hidden = !active; root.getElementById('panel')!.classList.toggle('selecting', active);
-    count.textContent = ready ? `已选 ${chosen.size} / ${questions.length}` : '读取完整目录…';
+    count.textContent = ready ? `已选 ${chosen.size} 组问答` : '读取完整目录…';
     lock();
-    controls.availability(active ? `导出所选（${chosen.size}）` : '下载', active && (!ready || !chosen.size));
+    controls.availability(active ? `导出所选 · ${chosen.size} 组` : '导出全部', active && (!ready || !chosen.size));
   }
   function toggle(id: string): void {
     if (!active || !ready || controls.downloading()) return;
@@ -38,9 +40,9 @@ export function mountFloatingSelection(root: ShadowRoot, controls: {
   }
   mode.addEventListener('click', () => {
     if (controls.downloading()) return;
-    active = !active; ready = false; questions = []; chosen.clear();
+    active = !active;if (ranges) ranges.open = false;
     const cached = active ? controls.cached?.() : undefined;
-    if (cached) { questions = cached.messages.filter(message => message.role === 'user'); ready = true; }
+    if (cached) sync(cached);
     update(); controls.message(''); controls.changed();
     if (active && !cached) controls.read();
   });
@@ -62,18 +64,19 @@ export function mountFloatingSelection(root: ShadowRoot, controls: {
     controls.message(''); update();
   });
   update();
+  function sync(data:Conversation): void {
+    if (!active && !ready) return;
+    questions = data.messages.filter(message => message.role === 'user'); ready = true;
+    const latest = new Map(questions.map(question => [question.id, question]));
+    for (const [id, question] of chosen) {
+      const current = latest.get(id);
+      if (!current || current.markdown !== question.markdown || current.html !== question.html) chosen.delete(id);
+    }
+    update();
+  }
   return {
     get active() { return active; }, get ready() { return ready; }, toggle, lock,
-    sync(data: Conversation): void {
-      if (!active) return;
-      questions = data.messages.filter(message => message.role === 'user'); ready = true;
-      const latest = new Map(questions.map(question => [question.id, question]));
-      for (const [id, question] of chosen) {
-        const current = latest.get(id);
-        if (!current || current.markdown !== question.markdown || current.html !== question.html) chosen.delete(id);
-      }
-      update();
-    },
+    sync,
     checkbox(entry: OutlineEntry, index: number): HTMLInputElement {
       const input = document.createElement('input'); input.type = 'checkbox'; input.value = entry.identity;
       input.setAttribute('aria-label', `选择第 ${index + 1} 组问答：${entry.text}`); input.checked = chosen.has(entry.identity);
@@ -86,6 +89,9 @@ export function mountFloatingSelection(root: ShadowRoot, controls: {
       const snapshot = [...chosen.values()].map(question => ({ ...question }));
       return data => selectQuestionGroups(data, snapshot);
     },
-    reset(): void { active = false; ready = false; questions = []; chosen.clear(); update(); },
+    reset(): void {
+      active = false; ready = false; questions = []; chosen.clear();if (ranges) ranges.open = false;
+      root.querySelectorAll<HTMLInputElement>('#range-from, #range-to').forEach(input => {input.value = '';});update();
+    },
   };
 }

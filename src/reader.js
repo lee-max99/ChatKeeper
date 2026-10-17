@@ -54,13 +54,17 @@
       article.classList.remove('search-current');
       if (hit) matches.push(article);
       const body = article.querySelector('.body');
+      body.querySelectorAll('details[data-search-opened]').forEach(detail => {detail.open = false;detail.removeAttribute('data-search-opened');});
+      if (query) body.querySelectorAll('details').forEach(detail => {
+        if (!detail.open && detail.textContent.toLocaleLowerCase().includes(query)) {detail.open = true;detail.setAttribute('data-search-opened','');}
+      });
       body.querySelectorAll('mark[data-search-hit]').forEach(mark => {
         const parent = mark.parentNode; mark.replaceWith(...mark.childNodes); parent.normalize();
       });
       if (hit) {
         const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
         const nodes = [];
-        while (walker.nextNode()) if (!walker.currentNode.parentElement.closest('button,math,script,style')) nodes.push(walker.currentNode);
+        while (walker.nextNode()) if (!walker.currentNode.parentElement.closest('button,math,svg,script,style')) nodes.push(walker.currentNode);
         nodes.forEach(node => {
           const text = node.textContent; const lower = text.toLocaleLowerCase();
           let from = 0; let found = lower.indexOf(query);

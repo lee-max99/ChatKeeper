@@ -157,6 +157,7 @@ try {
   await source.waitForFunction(() => document.querySelector('#chatkeeper-widget')?.hidden === false);
   assert.equal(await popup.locator('#title').inputValue(), '用 Python 整理阅读笔记');
   assert.equal(await popup.locator('#export').isEnabled(), true);
+  assert.equal(await popup.locator('#export').textContent(), '导出全部');
   assert.doesNotMatch(await popup.locator('body').innerText(), /采集|补采|导出范围/);
   assert.equal(apiCalls.length, 0, 'Opening the popup must not start history requests');
   await popup.screenshot({ path: 'artifacts/popup.png' });
@@ -276,6 +277,7 @@ try {
   popup = await openPopup();
   await popup.locator('#export').click();
   await popup.waitForFunction(() => !document.querySelector('#cancel').hidden);
+  assert.equal(await popup.locator('#export').textContent(), '读取记录…');
   await popup.close();
   await new Promise(resolveWait => setTimeout(resolveWait, 1500));
   popup = await openPopup();
@@ -393,7 +395,8 @@ try {
     const body = preview.locator('.message.assistant .body').last();
     for (const label of example.labels) assert.ok((await body.textContent()).includes(label), `HTML retains ${label}`);
     assert.equal(await body.locator('table').count(), example.tables);
-    assert.equal(await body.locator('script,iframe,img,input,button:not(.code-copy),box,text,title').count(), 0);
+    assert.equal(await body.locator('script,iframe,img,input,button:not(.code-copy),box').count(), 0);
+    assert.equal(await body.locator('text,title').evaluateAll(nodes => nodes.filter(node => node.namespaceURI !== 'http://www.w3.org/2000/svg').length),0);
     assert.equal(await body.locator('pre > button.code-copy').count(), await body.locator('pre').count());
     const prose = await body.evaluate(node => { const copy = node.cloneNode(true); copy.querySelectorAll('pre,code').forEach(code => code.remove()); return copy.textContent; });
     assert.doesNotMatch(prose, /<\/?[A-Za-z][\w-]*\b|chartType|dataKey|tabularNums|content=|private-hidden|secret-widget/);
@@ -455,6 +458,34 @@ try {
   await diagramBody.screenshot({path:'artifacts/connection-diagram-0.7.2.png'});
   await diagramPreview.close(); await context.setOffline(false);
   report.push('Static SVG diagram retains monitor icons, device boxes, dashed line and local arrow markers offline; Markdown retains diagram labels without repeated fallbacks.');
+
+  payload = shortConversation();payload.mapping['assistant-2'].message.content.parts = [await readFile('tests/fixtures/ui-fidelity.txt','utf8')];
+  popup = await openPopup();const fidelityMd = await download(popup,'md');const fidelityHtml = await download(popup,'html');await popup.close();
+  assert.doesNotMatch(fidelityMd.content,/#each|\/each|\{item\[|动态模板/);assert.match(fidelityMd.content,/后处理与终端供水/);
+  await writeFile('artifacts/ui-fidelity-0.7.3.html',fidelityHtml.content);await writeFile('artifacts/ui-fidelity-0.7.3.md',fidelityMd.content);
+  const fidelity = await context.newPage();const fidelityOutgoing = [];
+  fidelity.on('request',request => {if (/^https?:/.test(request.url())) fidelityOutgoing.push(request.url());});
+  await context.setOffline(true);await fidelity.goto(`file:///${resolve('artifacts/ui-fidelity-0.7.3.html').replaceAll('\\','/')}`);
+  const fidelityBody = fidelity.locator('.message.assistant .body').last();
+  const badge = await fidelityBody.locator('.ck-badge').first().boundingBox();const explanation = await fidelityBody.locator('.ck-badge + .ck-column').first().boundingBox();
+  assert.ok(badge.width < 64 && explanation.x - badge.x < 90 && explanation.width > 500,'Badge stays compact and explanation uses the row');
+  const flowBody = fidelityBody.locator('.ck-column.ck-center').first();
+  assert.equal(await flowBody.locator('.ck-title').count(),6);assert.equal(await flowBody.locator('.ck-icon').count(),5);
+  const positions = await flowBody.locator('.ck-title').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().y));
+  assert.ok(positions.every((value,index) => index === 0 || value > positions[index-1]));
+  const chartBars = fidelityBody.locator('.ck-chart-bar');assert.equal(await chartBars.count(),7);
+  const heights = await chartBars.evaluateAll(nodes => nodes.map(node => Number(node.getAttribute('height'))));assert.ok(Math.abs(heights[0]/heights[5]-13) < .001);assert.equal(heights[0],heights[6]);
+  assert.equal(await fidelityBody.locator('.ck-chart-data').evaluate(node => node.open),false);
+  assert.doesNotMatch(await fidelityBody.textContent(),/#each|\/each|\{item\[/);
+  await fidelityBody.screenshot({path:'artifacts/ui-fidelity-0.7.3-desktop.png'});
+  await fidelity.locator('#reader-search').fill('泵组故障');await fidelity.waitForFunction(() => document.querySelector('.ck-chart-data').open);
+  assert.equal(await fidelity.locator('svg mark').count(),0);await fidelity.locator('#clear-search').click();
+  await fidelity.setViewportSize({width:390,height:844});
+  assert.ok(await fidelity.evaluate(() => document.documentElement.scrollWidth <= innerWidth),'No page overflow on narrow screens');
+  assert.ok(await fidelityBody.locator('.ck-chart-scroll').evaluate(node => node.scrollWidth > node.clientWidth),'Chart can scroll locally instead of shrinking labels');
+  await fidelityBody.screenshot({path:'artifacts/ui-fidelity-0.7.3-mobile.png'});assert.deepEqual(fidelityOutgoing,[]);
+  await fidelity.close();await context.setOffline(false);
+  report.push('Reported layout cases: compact severity badges, six tuple/index flow stages with five arrows, and seven proportional bars render offline on desktop/mobile; chart data remains searchable without altering SVG.');
 
   await source.evaluate(() => { const button = document.createElement('button'); button.dataset.testid = 'stop-button'; document.body.append(button); });
   popup = await openPopup();

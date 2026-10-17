@@ -4,6 +4,28 @@ import type { ExportJob } from '../src/types';
 import { selectQuestionGroups } from '../src/conversation-selection';
 
 afterEach(() => { document.body.innerHTML = ''; vi.useRealTimers(); vi.unstubAllGlobals(); });
+it('shows record, image and browser-save stages while keeping the matching cancellation available',async () => {
+  vi.useFakeTimers();
+  const host = document.createElement('div');document.body.append(host);const root = host.attachShadow({mode:'open'});
+  root.innerHTML = '<select id="download-format"><option value="md">Markdown</option></select><button id="download"></button><button id="read-outline"></button><div><span id="download-status"></span><button id="download-cancel"></button></div>';
+  let finishImage!: (response:Response) => void;let finishCreate!: (value:object) => void;
+  vi.stubGlobal('fetch',() => new Promise<Response>(resolve => {finishImage = resolve;}));
+  vi.stubGlobal('chrome',{runtime:{sendMessage:async (message:{type:string}) => message.type === 'DOWNLOAD' ? new Promise(resolve => {finishCreate = resolve;}) : {ok:true,state:'complete',filename:'对话.md'}},storage:{local:{get:async () => ({}),set:async () => {}}}});
+  const data = {title:'当前会话',url:location.href,exportedAt:'',warnings:[],messages:[{id:'a',stable:true,role:'assistant' as const,html:'',markdown:'正文',images:[{alt:'原图',url:'https://images.oaiusercontent.com/picture.png'}]}]};
+  let job:ExportJob = {ok:true,state:'running'};
+  const bridge = (type:string) => type === 'CK_INFO' ? {ok:true,data:{generating:false}} : type === 'CK_STATUS' ? job : {ok:true};
+  const controls = mountFloatingDownload(root,bridge,() => {},() => {});
+  controls.start('download');expect(root.getElementById('download')!.textContent).toContain('读取记录');
+  job = {ok:true,state:'done',data};await vi.advanceTimersByTimeAsync(200);
+  expect(root.getElementById('download')!.textContent).toContain('保存图片');
+  expect((root.getElementById('download-cancel') as HTMLButtonElement).hidden).toBe(false);
+  finishImage(new Response(Uint8Array.from([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82]),{headers:{'Content-Type':'image/png'}}));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(root.getElementById('download')!.textContent).toContain('等待保存');
+  expect((root.getElementById('download-cancel') as HTMLButtonElement).hidden).toBe(true);
+  finishCreate({ok:true,id:7});await vi.advanceTimersByTimeAsync(0);
+  expect(root.getElementById('download-status')!.textContent).toContain('已保存：对话.md');controls.reset();
+});
 it('cancels active image acquisition without starting a download', async () => {
   const host = document.createElement('div'); document.body.append(host); const root = host.attachShadow({mode:'open'});
   root.innerHTML = '<select id="download-format"><option value="md">Markdown</option></select><button id="download"></button><button id="read-outline"></button><div><span id="download-status"></span><button id="download-cancel"></button></div>';

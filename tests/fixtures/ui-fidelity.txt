@@ -1,0 +1,36 @@
+## 二、已经发现的关键问题
+
+通过进一步检查 PLC2 的程序变量引用，发现两处值得优先复核的异常。
+
+<row align="start" gap={2}><badge color="danger">P0</badge><column gap={1}><text weight="bold">PLC2 的二级 RO 高压泵 A 压力报警可能写错变量</text><text>在处理 `PTIC_RO2A_PV`、`PTIC_RO2A_H_Set` 的程序段中，出现的输出变量却是 `PTIC_RO1A_H_ON`。</text><text>`RO2A` 应对应二级 RO A，而 `RO1A` 对应一级 RO A。相同变量在多个位置重复出现，并非单个文本拼写问题。</text><text>需要在原始梯形图中确认实际输出地址。</text></column></row>
+
+<divider/>
+
+<row align="start" gap={2}><badge color="warning">P1</badge><column gap={1}><text weight="bold">PLC2 的第二路 PID 参数引用不一致</text><text>PLC2 中 `PID1_CTRL` 使用的是 `TICA2A_P`、`TICA2A_I`、`TICA2A_D`，但参数写入目标分别出现 `PID2_Gain`、`PID2_I_Time`、`PID2_D_Time`，而不是预期的 `PID1_*`。</text><text>这可能是 PID 参数表映射错误，需核查实际使用的参数地址。</text></column></row>
+
+## 四、工艺控制流程
+
+<box border padding={3}>
+<column align="center" gap={3}>
+{#each [
+  ["原水系统", "原水箱、原水泵 A/B/C"],
+  ["预处理 / 超滤 UF", "盘滤、UF 双路运行、反洗及加药"],
+  ["一级反渗透 RO1", "一级增压泵、高压泵 A/B/C"],
+  ["二级反渗透 RO2", "二级增压泵、高压泵 A/B"],
+  ["EDI 电去离子", "A/B 两套，各含 5 组电源及流量监控"],
+  ["后处理与终端供水", "去离子泵、混床、终端供水泵"]
+] as item,i}
+<box align="center"><title size="md">{item[0]}</title><text color="secondary" size="sm">{item[1]}</text></box>
+{#if i < 5}<icon name="arrow-down" color="tertiary"/>{/if}
+{/each}
+</column>
+<text size="sm" color="secondary">按照工程命名推断的工艺顺序。实际管路应以 P&amp;ID 为准。</text>
+</box>
+
+## 六、报警系统分析
+
+<grid columns={2} gap={3}><box><text color="secondary" size="sm">有效报警</text><title size="xl">103</title></box><box><text color="secondary" size="sm">空白模板节点</text><title size="xl">2,000</title></box></grid>
+
+<Chart content={{"chartType":"bar","xKey":"category","series":[{"dataKey":"count","label":"报警数量","color":"#5097ff"}],"data":[{"category":"泵组故障","count":26},{"category":"EDI 电源","count":10},{"category":"EDI 流量低","count":20},{"category":"压力/药剂/急停","count":13},{"category":"水箱超高液位","count":6},{"category":"温度/电导率","count":2},{"category":"其他过程限值","count":26}],"meta":{"footer":"根据 BZ.xml 中非空的 103 条报警定义统计"}}}/>
+
+报警文件中没有明确命名为 PLC 间通信中断、Modbus 通信超时的报警。

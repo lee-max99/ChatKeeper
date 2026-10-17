@@ -1,5 +1,5 @@
 import { renderHtml, renderMarkdown, safeFilename } from './exporters';
-import { saveDownload } from './download-client';
+import { saveDownload,downloadSummary } from './download-client';
 import { fetchExportImages } from './image-fetch';
 import type { Conversation, ExportJob, PageInfo } from './types';
 
@@ -21,7 +21,8 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
   let imagesController: AbortController | undefined;
   let operation: 'outline' | 'download' | undefined;
   let exportData: ((data: Conversation) => Conversation) | undefined;
-  let label = '下载'; let unavailable = false;
+  let label = '导出全部'; let unavailable = false;
+  let phase = '读取记录…';
   const request = <T>(type: string): T => {
     const result = bridge(type) as T & { ok: boolean; error?: string };
     if (!result?.ok) throw new Error(result?.error || '连接已断开，请刷新页面。');
@@ -34,8 +35,8 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
   }
   function setBusy(value: boolean): void {
     busy = value; button.disabled = unavailable || (value && operation === 'download'); format.disabled = value && operation === 'download'; read.disabled = value;
-    button.textContent = value && operation === 'download' ? '准备中…' : label; button.setAttribute('aria-busy', String(value && operation === 'download'));
-    cancel.hidden = !value; cancel.disabled = false;
+    button.textContent = value && operation === 'download' ? phase : label; button.setAttribute('aria-busy', String(value && operation === 'download'));
+    cancel.hidden = !value || (operation === 'download' && phase === '等待保存…'); cancel.disabled = false;
     lifecycle.stateChanged?.();
   }
   async function poll(token: number, url: string): Promise<void> {
@@ -48,18 +49,20 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
       request('CK_CHECK'); ready(job.data);
       if (operation === 'outline') { setBusy(false); message(''); return; }
       const selected = format.value === 'html' ? 'html' : 'md';
+      const selectedData = exportData ? exportData(job.data) : job.data;
       imagesController = new AbortController();
-      const data = await fetchExportImages({ ...(exportData ? exportData(job.data) : job.data), exportedAt: new Date().toISOString() }, () => token === run && location.href === url, message, imagesController.signal);
+      if (selectedData.messages.some(item => item.images?.length)) {phase = '保存图片…';setBusy(true);}
+      const data = await fetchExportImages({ ...selectedData, exportedAt: new Date().toISOString() }, () => token === run && location.href === url, message, imagesController.signal);
       imagesController = undefined;
+      phase = '生成文件…';setBusy(true);message('正在生成导出文件…');
       const content = selected === 'html' ? renderHtml(data) : renderMarkdown(data);
       request('CK_CHECK');
       if (token !== run || location.href !== url) return;
-      cancel.hidden = true;
-      button.textContent = '等待保存…';
+      phase = '等待保存…';setBusy(true);
       const result = await saveDownload({ type: 'DOWNLOAD', format: selected,
         filename: safeFilename(`${data.title}_${new Date().toLocaleDateString('sv-SE')}`, selected), content }, message, () => token === run && location.href === url);
       if (token !== run || location.href !== url) return;
-      setBusy(false); message(result + (data.warnings.find(warning => /张图片未能保存/.test(warning)) ? '；部分图片未保存，详情见导出文件。' : ''));
+      setBusy(false); message(downloadSummary(result,data));
     } catch (error) {
       if (token !== run || location.href !== url) return;
       setBusy(false); lifecycle.failed?.(error); message(errorText(error, '导出失败，请重试。'), true);
@@ -73,13 +76,13 @@ export function mountFloatingDownload(root: ShadowRoot, bridge: (type: string) =
     }
     if (busy) {
       if (purpose === 'download' && operation === 'outline') {
-        operation = 'download'; setBusy(true); message('正在准备完整记录…');
+        operation = 'download';phase = '读取记录…'; setBusy(true); message('正在读取聊天记录…');
       }
       return;
     }
     const token = ++run; const url = location.href;
-    operation = purpose;
-    setBusy(true); message(purpose === 'outline' ? '正在读取目录…' : '正在准备完整记录…');
+    operation = purpose;phase = '读取记录…';
+    setBusy(true); message(purpose === 'outline' ? '正在读取目录…' : '正在读取聊天记录…');
     try {
       const info = request<{ data: PageInfo }>('CK_INFO').data;
       if (info.generating) throw new Error('回答还在生成，请等待结束后重试。');

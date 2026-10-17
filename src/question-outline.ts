@@ -161,6 +161,7 @@ export function savedQuestionOutline(data: Conversation, doc: Document): Outline
   return outline;
 }
 
+let lastHighlight: Animation | undefined;
 export function jumpToQuestion(entry: OutlineEntry): boolean {
   if (!entry.target?.isConnected || !visible(entry.target) || entry.element?.closest(ASSISTANT) || entry.target.closest(ASSISTANT)) return false;
   const oldMargin = entry.target.style.scrollMarginTop;
@@ -168,5 +169,10 @@ export function jumpToQuestion(entry: OutlineEntry): boolean {
   try {
     entry.target.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
   } finally { entry.target.style.scrollMarginTop = oldMargin; }
+  try {
+    lastHighlight?.cancel();
+    lastHighlight = entry.target.animate?.([{outline:'2px solid #c4b5fd',outlineOffset:'5px'},{outline:'2px solid transparent',outlineOffset:'5px'}],
+      {duration:matchMedia('(prefers-reduced-motion: reduce)').matches ? 500 : 1500,easing:'ease-out'});
+  } catch { /* Visual emphasis is optional; navigation has already succeeded. */ }
   return true;
 }

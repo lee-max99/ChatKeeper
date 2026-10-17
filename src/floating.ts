@@ -14,9 +14,9 @@ export function mountFloating(bridge: (type: string) => unknown): void {
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `<style>${floatingStyle}</style><button id="launcher" title="提问目录" aria-label="打开提问目录" aria-expanded="false" aria-controls="panel">${icon}</button>
   <section id="panel" aria-label="ChatKeeper 提问目录" hidden><header id="drag-handle"><div class="brand">${icon}<span>ChatKeeper</span></div><button id="minimize" title="收起" aria-label="收起提问目录"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></header>
-  <div class="summary"><h2 id="title"></h2><div class="meta"><span>提问目录</span><div class="meta-right"><span id="count" aria-live="polite"></span><button id="select-mode" type="button" aria-pressed="false">选择</button></div></div><div class="search-row"><input id="question-search" type="search" placeholder="搜索提问" aria-label="搜索提问" autocomplete="off"></div><div id="selection-tools" hidden><span id="selected-count" aria-live="polite"></span><div><button id="select-all" type="button">全选</button><button id="clear-selection" type="button">清空</button></div><div class="range-row"><input id="range-from" type="number" min="1" placeholder="起始" aria-label="起始提问序号"><span>—</span><input id="range-to" type="number" min="1" placeholder="结束" aria-label="结束提问序号"><button id="select-range" type="button">选取范围</button></div></div></div>
+  <div class="summary"><h2 id="title"></h2><div class="meta"><span>提问目录</span><div class="meta-right"><span id="count" aria-live="polite"></span><button id="select-mode" type="button" aria-pressed="false">选择问答</button></div></div><div class="search-row"><input id="question-search" type="search" placeholder="搜索提问" aria-label="搜索提问" autocomplete="off"></div><div id="selection-tools" hidden><span id="selected-count" aria-live="polite"></span><div><button id="select-all" type="button">全选</button><button id="clear-selection" type="button">清空</button></div><details id="selection-range"><summary>按序号选取</summary><div class="range-row"><input id="range-from" type="number" min="1" placeholder="起始" aria-label="起始提问序号"><span>—</span><input id="range-to" type="number" min="1" placeholder="结束" aria-label="结束提问序号"><button id="select-range" type="button">选取</button></div><p class="range-note">按完整目录序号选择</p></details></div></div>
   <nav class="outline" aria-label="当前会话的提问"><ol id="questions"></ol><p id="search-empty" hidden>没有匹配的提问</p><div id="empty" hidden><p>页面提问未识别，可读取保存的目录。</p><button id="read-outline" type="button">读取目录</button></div></nav>
-  <footer class="downloads"><select id="download-format" aria-label="下载格式"><option value="md">Markdown</option><option value="html">HTML</option></select><button id="download" type="button">下载</button><div class="download-status" hidden><span id="download-status" role="status" aria-live="polite"></span><button id="download-retry" type="button" hidden>重试</button><button id="download-cancel" type="button" hidden>取消</button></div></footer></section>`;
+  <footer class="downloads"><select id="download-format" aria-label="导出格式"><option value="md">Markdown</option><option value="html">HTML</option></select><button id="download" type="button">导出全部</button><div class="download-status" hidden><span id="download-status" role="status" aria-live="polite"></span><button id="download-retry" type="button" hidden>重试</button><button id="download-cancel" type="button" hidden>取消</button></div></footer></section>`;
   const get = <T extends HTMLElement>(id: string) => root.getElementById(id) as T;
   const launcher = get<HTMLButtonElement>('launcher'); const panel = get('panel');
   const title = get('title'); const list = get('questions'); const count = get('count'); const empty = get('empty');
@@ -32,10 +32,40 @@ export function mountFloating(bridge: (type: string) => unknown): void {
   let position: Position | undefined; let dragged = false; let active = -1;
   let scrollFrame = 0;
   let navigationRun = 0; let navigating = false;
+  let navigationStatus: {identity:string;text:string;loading:boolean} | undefined;
+  function paintNavigation(): void {
+    [...list.children].forEach((item,index) => {
+      const state = navigationStatus?.identity === entries[index]?.identity ? navigationStatus : undefined;
+      const status = item.querySelector<HTMLElement>('.question-status');
+      if (status) {status.textContent = state?.text || '';status.hidden = !state?.text;}
+      item.querySelector('.question-button')?.setAttribute('aria-busy',String(Boolean(state?.loading)));
+    });
+  }
   function stopNavigation(notify = false): void {
     navigationRun++;
-    if (navigating && notify) downloads.message('已停止定位。');
+    if (!navigationStatus || (notify && !navigating)) {navigating = false;return;}
+    if (navigating && notify && navigationStatus) navigationStatus = {...navigationStatus,text:'已停止定位',loading:false};
+    else navigationStatus = undefined;
     navigating = false;
+    paintNavigation();
+  }
+  function startNavigation(entry:OutlineEntry,renderedUrl:string): void {
+    if (location.href !== renderedUrl) {dirty = true;update();return;}
+    if (downloads.downloading) return;
+    stopNavigation();navigating = true;const token = navigationRun;
+    const current = () => token === navigationRun && location.href === renderedUrl && expanded && !host.hidden;
+    const progress = (text:string) => {if (current()) {navigationStatus = {identity:entry.identity,text,loading:true};paintNavigation();}};
+    progress('正在定位…');
+    void navigateQuestion(entry,() => usingSavedOutline && saved ? savedQuestionOutline(saved,document) : collectQuestions(document),current,() => progress('正在加载，按 Esc 可停止'))
+      .then(result => {
+        if (!current()) return;
+        navigating = false;
+        if (usingSavedOutline) {outlineFingerprint = outlinePageFingerprint(document);refreshAt = 0;}
+        navigationStatus = result === 'found' ? undefined : {identity:entry.identity,text:'暂时无法定位，点击可重试',loading:false};paintNavigation();dirty = true;update();
+      }).catch(() => {
+        if (!current()) return;
+        navigating = false;navigationStatus = {identity:entry.identity,text:'暂时无法定位，点击可重试',loading:false};paintNavigation();dirty = true;update();
+      });
   }
   let selection: ReturnType<typeof mountFloatingSelection> | undefined; let renderedSelecting = false;
 
@@ -47,7 +77,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
     host.style.right = `${right}px`; host.style.top = `${top}px`;
   }
   function highlight(): void {
-    if (!expanded || host.hidden || !entries.length) return;
+    if (!expanded || host.hidden || navigating || !entries.length) return;
     const line = Math.min(140, innerHeight * .25); let current = entries.findIndex(entry => entry.target?.isConnected);
     for (let index = 0; index < entries.length; index++) {
       if (!entries[index].target?.isConnected) continue;
@@ -64,40 +94,38 @@ export function mountFloating(bridge: (type: string) => unknown): void {
     const selecting = Boolean(selection?.active);
     if (selecting === renderedSelecting && next.length === entries.length && next.every((entry, index) => entry.element === entries[index].element && entry.target === entries[index].target && entry.text === entries[index].text && entry.identity === entries[index].identity && entry.domIdentity === entries[index].domIdentity)) return;
     renderedSelecting = selecting;
-    const focusedIndex = buttons.findIndex(button => button === root.activeElement);
+    const focused = root.activeElement;
+    const focusedIndex = [...list.children].findIndex(item => item.contains(focused));
+    const focusSelector = focused?.matches('input[type=checkbox]') ? 'input[type=checkbox]' : focused?.matches('.question-jump') ? '.question-jump' : '.question-button';
     const focusedEntry = entries[focusedIndex]; const scrollTop = list.parentElement!.scrollTop;
     entries = next; buttons = []; active = -1;
     const fragment = document.createDocumentFragment(); const renderedUrl = lastUrl;
     entries.forEach((entry, index) => {
-      const item = document.createElement('li'); const button = document.createElement('button'); button.type = 'button';
+      const item = document.createElement('li'); const button = document.createElement('button'); button.type = 'button';button.className = 'question-button';
       const number = document.createElement('span'); number.className = 'number'; number.textContent = String(index + 1).padStart(2, '0'); number.setAttribute('aria-hidden', 'true');
       const text = document.createElement('span'); text.className = 'question-text'; text.textContent = entry.text;
-      button.title = entry.text; button.setAttribute('aria-label', `第 ${index + 1} 个提问：${entry.text}`); button.append(number, text);
+      const spinner = document.createElement('span');spinner.className = 'nav-spinner';spinner.setAttribute('aria-hidden','true');
+      button.title = entry.text; button.setAttribute('aria-label', `第 ${index + 1} 个提问：${entry.text}`); button.append(number, text,spinner);
       button.addEventListener('click', () => {
         if (location.href !== renderedUrl) { dirty = true; update(); return; }
         if (selection?.active) { selection.toggle(entry.identity); return; }
-        if (downloads.busy) return;
-        stopNavigation(); navigating = true;
-        const token = navigationRun;
-        const current = () => token === navigationRun && location.href === renderedUrl && expanded && !host.hidden && !selection?.active;
-        void navigateQuestion(entry, () => usingSavedOutline && saved ? savedQuestionOutline(saved, document) : collectQuestions(document), current,
-          text => downloads.message(text)).then(result => {
-          if (!current()) return;
-          navigating = false;
-          if (usingSavedOutline) { outlineFingerprint = outlinePageFingerprint(document); refreshAt = 0; }
-          downloads.message(result === 'found' ? '' : '自动加载后仍无法定位该提问，可稍后重试。下载不受影响。');
-        }).catch(() => {
-          if (!current()) return;
-          navigating = false; downloads.message('暂时无法定位该提问，可稍后重试。下载不受影响。');
-        });
+        startNavigation(entry,renderedUrl);
       });
       if (selecting && selection) item.append(selection.checkbox(entry, index));
-      item.append(button); fragment.append(item); buttons.push(button);
+      item.append(button);
+      if (selecting) {
+        const jump = document.createElement('button');jump.type = 'button';jump.className = 'question-jump';jump.title = '定位提问';jump.setAttribute('aria-label',`定位第 ${index + 1} 个提问`);
+        jump.innerHTML = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        jump.addEventListener('click',() => startNavigation(entry,renderedUrl));item.append(jump);
+      }
+      const status = document.createElement('span');status.className = 'question-status';status.hidden = true;status.setAttribute('role','status');status.setAttribute('aria-live','polite');item.append(status);
+      fragment.append(item); buttons.push(button);
     });
-    list.replaceChildren(fragment); filterQuestions(); count.textContent = `${entries.length} 个提问`; empty.hidden = entries.length > 0;
+    list.replaceChildren(fragment);paintNavigation();filterQuestions(); count.textContent = `${entries.length} 个提问`; empty.hidden = entries.length > 0;
     if (focusedEntry && buttons.length) {
       const sameEntry = entries.findIndex(entry => (focusedEntry.element && entry.element === focusedEntry.element) || (focusedEntry.identity && entry.identity === focusedEntry.identity));
-      buttons[sameEntry >= 0 ? sameEntry : Math.min(focusedIndex, buttons.length - 1)].focus({ preventScroll: true });
+      const index = sameEntry >= 0 ? sameEntry : Math.min(focusedIndex, buttons.length - 1);
+      (list.children[index].querySelector<HTMLElement>(focusSelector) || buttons[index]).focus({ preventScroll: true });
       list.parentElement!.scrollTop = scrollTop;
     }
   }
@@ -108,6 +136,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
     get('search-empty').hidden = !query || visible > 0;
   }
   get('question-search').addEventListener('input', filterQuestions);
+  get('selection-range').addEventListener('toggle',place);
   function show(value: boolean): void {
     if (!value) stopNavigation();
     expanded = value; panel.hidden = !value; launcher.hidden = value;
@@ -130,7 +159,8 @@ export function mountFloating(bridge: (type: string) => unknown): void {
       entries = []; buttons = []; active = -1; list.replaceChildren();
     }
     observedContentVersion = contentVersion;
-    if (!expanded || host.hidden) return;
+    // Navigation checks the page independently; defer full directory work until it settles.
+    if (!expanded || host.hidden || navigating) return;
     const nextTitle = document.title.replace(/\s*[-–—|]\s*ChatGPT\s*$/i, '').trim() || '当前会话';
     if (title.textContent !== nextTitle) { title.textContent = nextTitle; title.title = nextTitle; }
     if (dirty) {
@@ -197,7 +227,7 @@ export function mountFloating(bridge: (type: string) => unknown): void {
   launcher.addEventListener('pointerdown', startDrag); get('drag-handle').addEventListener('pointerdown', startDrag);
   window.addEventListener('resize', () => { place(); highlight(); });
   window.addEventListener('scroll', () => {
-    if (!expanded || host.hidden || scrollFrame) return;
+    if (!expanded || host.hidden || navigating || scrollFrame) return;
     scrollFrame = requestAnimationFrame(() => { scrollFrame = 0; highlight(); });
   }, { capture: true, passive: true });
   window.addEventListener('popstate', update); window.addEventListener('hashchange', update);
