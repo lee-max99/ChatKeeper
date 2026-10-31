@@ -29,6 +29,17 @@ export async function navigateQuestion(entry: OutlineEntry, read: () => OutlineE
   if (!current()) return 'cancelled';
   if (target && jumpToQuestion(target)) return 'found';
   if (!target) return 'unavailable';
+  const loadDirection = (items: OutlineEntry[]): number => {
+    const index = items.findIndex(same);
+    const mounted = items.flatMap((item, offset) => item.target?.isConnected ? [offset] : []);
+    if (index < 0 || !mounted.length) return 0;
+    if (index < mounted[0]) return -1;
+    if (index > mounted[mounted.length - 1]) return 1;
+    // A missing match inside the loaded range is not evidence of unloaded history above it.
+    return 0;
+  };
+  let direction = loadDirection(initial);
+  if (!direction) return 'unavailable';
   const doc = document;
   const origins = [initial.find(item => item.target?.isConnected)?.target, doc.querySelector<HTMLElement>('main, [role="main"]')];
   let container: HTMLElement | undefined;
@@ -42,18 +53,15 @@ export async function navigateQuestion(entry: OutlineEntry, read: () => OutlineE
   if (!container || container.scrollHeight <= container.clientHeight) return 'unavailable';
   const originalTop = container.scrollTop; const deadline = Date.now() + 45_000;
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let boundarySince = 0; let lastState = ''; let direction = -1;
+  let boundarySince = 0; let lastState = '';
   let first = true;
   progress('正在加载并定位提问…滚动聊天页可停止。');
   while (current() && container.isConnected && Date.now() < deadline) {
     if (!first) initial = read();first = false;const index = initial.findIndex(same);
     if (index < 0) break;
     if (jumpToQuestion(initial[index])) return 'found';
+    direction = loadDirection(initial);if (!direction) break;
     const mounted = initial.flatMap((item, offset) => item.target?.isConnected ? [offset] : []);
-    if (mounted.length) {
-      if (index < mounted[0]) direction = -1;
-      else if (index > mounted[mounted.length - 1]) direction = 1;
-    }
     const top = container.scrollTop; const max = container.scrollHeight - container.clientHeight;
     const state = `${top}:${max}:${mounted.join(',')}`;
     const boundary = (direction < 0 && top <= 1) || (direction > 0 && top >= max - 1);

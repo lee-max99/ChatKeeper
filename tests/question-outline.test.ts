@@ -1,7 +1,26 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { collectQuestions, jumpToQuestion, outlinePageFingerprint, savedQuestionOutline } from '../src/question-outline';
+import progressQuestion from './fixtures/progress-question.txt?raw';
 
 afterEach(() => { document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it.each(['blocks','breaks','list'])('maps the loaded fourth prompt with mixed line boundaries and inline emphasis (%s)', layout => {
+  const lines=['假设我目前整理了这些笔记：','Python 学习：共12篇，已整理9篇。','阅读：共8篇，已整理3篇。'];
+  const formatted=['假设我目前整理了这些笔记：','Python 学习：共<strong>12</strong>篇，已整理<strong>9</strong>篇。','阅读：共<strong>8</strong>篇，已整理<strong>3</strong>篇。'];
+  const body=layout==='blocks'?formatted.map(line=>`<div>${line}</div>`).join(''):layout==='breaks'?formatted.join('<br>'):`<p>${formatted[0]}</p><ul>${formatted.slice(1).map(line=>`<li>${line}</li>`).join('')}</ul>`;
+  document.body.innerHTML=`<main>${Array.from({length:5},(_,index)=>`<article data-testid="conversation-turn-${index*2}"><div data-message-author-role="user">${index===3?body:`问题${index+1}`}</div></article>`).join('')}</main>`;
+  const data={title:'',url:'',exportedAt:'',warnings:[],messages:Array.from({length:5},(_,index)=>({id:`u${index}`,stable:true,role:'user' as const,html:'',markdown:index===3?lines.join('\n\n'):`问题${index+1}`}))};
+  const outline=savedQuestionOutline(data,document);
+  expect(outline[3].target).toBe(document.querySelector('[data-testid="conversation-turn-6"]'));
+  expect(outline[0].target).not.toBe(outline[3].target);
+});
+
+it.each([true,false])('locates the reported progress prompt with literal list numbers and fragmented inline text (role marker=%s)', marked => {
+  const html=progressQuestion.trim().split('\n').map(line=>`<div>${line.replace('Python','<span>Pyth</span><strong>on</strong>').replace('整理进度报告','<strong>整理</strong>进度报告')}</div>`).join('');
+  document.body.innerHTML=`<main><article data-testid="conversation-turn-0"><div data-message-author-role="user">第一个问题</div></article><article data-testid="conversation-turn-6"><div ${marked?'data-message-author-role="user"':''}>${html}</div></article><article data-testid="conversation-turn-7"><div data-message-author-role="assistant">整理进度报告：整体完成率为 70%。</div></article></main>`;
+  const data={title:'',url:'',exportedAt:'',warnings:[],messages:[{id:'u0',stable:true,role:'user' as const,html:'',markdown:'第一个问题'},{id:'u3',stable:true,role:'user' as const,html:'',markdown:progressQuestion.trim()},{id:'a3',stable:true,role:'assistant' as const,html:'',markdown:'整理进度报告：整体完成率为 70%。'}]};
+  expect(savedQuestionOutline(data,document)[1].target).toBe(document.querySelector('[data-testid="conversation-turn-6"]'));
+});
 
 it.each([
   '<div data-message-author-role="user">第一行<br>第二行</div>',
@@ -142,6 +161,22 @@ it('does not jump to an unmarked answer paragraph that repeats the question with
     { id: 'a', stable: true, role: 'assistant' as const, html: '', markdown: '你好\n\n我可以帮你什么？' },
   ] };
   expect(savedQuestionOutline(data, document)[0].target).toBeNull();
+});
+
+it.each([true,false])('never combines separate loaded messages into an unloaded question (assistant marker=%s)', marked => {
+  document.body.innerHTML=`<main><section><article data-testid="conversation-turn-2"><div data-message-author-role="user">你好</div></article><article data-testid="conversation-turn-3"><div ${marked?'data-message-author-role="assistant"':''}>好的</div></article></section></main>`;
+  const messages=[{id:'old',stable:true,role:'user' as const,html:'',markdown:'你好 好的'},{id:'recent',stable:true,role:'user' as const,html:'',markdown:'你好'},{id:'answer',stable:true,role:'assistant' as const,html:'',markdown:'好的'}];
+  const outline=savedQuestionOutline({title:'',url:'',exportedAt:'',warnings:[],messages},document);
+  expect(outline[0].target).toBeNull();
+  expect(outline[1].target).toBe(document.querySelector('[data-testid="conversation-turn-2"]'));
+});
+
+it('does not extend a known user bubble with an unmarked sibling answer when turn wrappers are absent', () => {
+  document.body.innerHTML='<main><section><div data-message-author-role="user">你好</div><div>好的</div></section></main>';
+  const messages=[{id:'old',stable:true,role:'user' as const,html:'',markdown:'你好 好的'},{id:'recent',stable:true,role:'user' as const,html:'',markdown:'你好'},{id:'answer',stable:true,role:'assistant' as const,html:'',markdown:'好的'}];
+  const outline=savedQuestionOutline({title:'',url:'',exportedAt:'',warnings:[],messages},document);
+  expect(outline[0].target).toBeNull();
+  expect(outline[1].target).toBe(document.querySelector('[data-message-author-role="user"]'));
 });
 
 it('updates text and replaces removed nodes without caching a previous page or persisting messages', () => {

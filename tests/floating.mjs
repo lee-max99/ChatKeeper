@@ -210,6 +210,7 @@ try {
   assert.equal(Object.keys(stored).every(key => ['floatingEnabled', 'floatingPosition', 'floatingFormat'].includes(key)), true);
   results.push('Disabled outline does no scans; narrow viewport remains accessible; only UI preferences are stored and no API is requested.');
 
+  apiPrompts=['<img src=x onerror=alert(1)>'];
   await page.evaluate(() => { document.querySelector('main').innerHTML = '<p>尚未加载的会话</p>'; });
   await page.waitForFunction(() => document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions .question-button').length === 0);
   assert.equal(await widget.locator('#empty').isVisible(), true);
@@ -219,6 +220,12 @@ try {
   assert.match(await items.first().textContent(), /<img src=x/);
   results.push('Unloaded-page empty state recovers automatically and question text cannot inject markup.');
 
+  // The earlier empty state may still be completing its automatic saved-outline read.
+  const preparationDeadline=Date.now()+10_000;
+  while((await request('CK_STATUS')).state==='running') {
+    assert.ok(Date.now()<preparationDeadline,'The automatic directory read finishes before the explicit preparation scenario');
+    await pause(80);
+  }
   delay = 3000;
   assert.equal((await request('CK_PREPARE')).ok, true);
   await page.evaluate(() => { history.pushState({}, '', '/c/third'); document.title = '切换后的会话 - ChatGPT'; });
@@ -531,6 +538,32 @@ try {
   assert.ok((await widget.boundingBox()).width <= 336);
   await widget.screenshot({path:'artifacts/floating-selection-mobile-0.7.4.png'});
   results.push('Cached selection opens without another API read; search filters rows without changing selections, and range selection exports the intended groups.');
+
+  await page.setViewportSize({width:1280,height:900});
+  const reportedQuestion=(await readFile('tests/fixtures/progress-question.txt','utf8')).trim();
+  apiPrompts=['问题一','问题二','问题三',reportedQuestion,'python 学完后可以做什么'];
+  await page.evaluate(prompts=>{
+    history.pushState({},'', '/c/loaded-fourth-question');
+    document.querySelector('main').innerHTML=prompts.map((text,index)=>`<article data-testid="conversation-turn-${index*2}"><div data-message-author-role="user">${index===3?text.split('\n').map(line=>`<div>${line.replace('Python','<span>Pyth</span><strong>on</strong>')}</div>`).join(''):text}</div></article><article data-testid="conversation-turn-${index*2+1}"><div data-message-author-role="assistant">回答 ${index}</div></article>`).join('');
+  },apiPrompts);
+  await page.waitForFunction(()=>document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions li').length===5);
+  await widget.locator('#select-mode').click();
+  await page.waitForFunction(()=>document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('#questions input').length===5);
+  await widget.locator('#select-mode').click();
+  await page.locator('main').evaluate(main=>{main.scrollTop=main.scrollHeight;});
+  await items.nth(3).click();
+  await page.waitForFunction(()=>{const top=document.querySelector('[data-testid="conversation-turn-6"]').getBoundingClientRect().top;return top>=70&&top<110;});
+  assert.equal(await widget.locator('.question-status').nth(3).isVisible(),false);
+  assert.ok(await page.locator('main').evaluate(main=>main.scrollTop)>400,'Loaded question 04 never resolves to the first turn');
+  results.push('The reported multiline progress prompt at 04, with literal list numbers and inline emphasis, jumps directly from saved history to the loaded fourth turn without a loading state.');
+
+  await page.locator('[data-testid="conversation-turn-6"]').evaluate(node=>node.remove());
+  await pause(1500);
+  const beforeUnmatched=await page.locator('main').evaluate(main=>main.scrollTop);
+  await items.nth(3).click();
+  await page.waitForFunction(()=>document.querySelector('#chatkeeper-widget').shadowRoot.querySelectorAll('.question-status')[3].textContent.includes('暂时无法定位'));
+  assert.equal(await page.locator('main').evaluate(main=>main.scrollTop),beforeUnmatched,'An unmatched interior prompt does not start a blind scroll to the first turn');
+  results.push('An unmatched directory item between loaded neighbours reports a retryable locating failure without entering history loading or moving the chat.');
   assert.deepEqual(errors, []);
   await writeFile('artifacts/floating-report.json', JSON.stringify({ status: 'passed', fixtureOnly: true, results, errors }, null, 2));
   console.log(results.join('\n'));

@@ -1,10 +1,10 @@
-# ChatKeeper · v0.7.5
+# ChatKeeper · v0.7.6
 
 我写的一个 ChatGPT 浏览器插件，用来查找提问、保存对话。支持 Chrome / Edge，可以导出 Markdown 或带目录、搜索的离线 HTML，无需 API Key。
 
 ## 安装
 
-[下载安装包](https://github.com/lee-max99/ChatKeeper/releases/download/v0.7.5/ChatKeeper-0.7.5.zip) · [所有版本](https://github.com/lee-max99/ChatKeeper/releases)
+[下载安装包](https://github.com/lee-max99/ChatKeeper/releases/download/v0.7.6/ChatKeeper-0.7.6.zip) · [所有版本](https://github.com/lee-max99/ChatKeeper/releases)
 
 1. 下载并解压安装包。
 2. 打开 `chrome://extensions` 或 `edge://extensions`，开启开发者模式。

@@ -1,0 +1,22 @@
+ChatKeeper 0.7.5 · Microsoft Edge 上架材料
+
+请先解压整个材料包。上传到 Edge 后台的是 package/ChatKeeper-0.7.5-edge.zip，不是整个材料包 ZIP。
+
+1. Packages：上传 package/ChatKeeper-0.7.5-edge.zip。它是已核对的 0.7.5 中文版，不包含尚未实现的中英文设计方案。
+2. Availability：按实际需要选择 Public 或 Hidden、发布市场。
+3. Properties：分类建议 Productivity。支持网址 https://github.com/lee-max99/ChatKeeper/issues 。官网字段可使用项目主页，或留空；支持字段按实际后台填写。
+4. Privacy：将 documents/review-and-privacy.txt 内单一用途、逐项权限用途填写到对应字段。程序逻辑随包提供，聊天 JSON/图片请求不用于执行远程代码。根据现场数据类别定义如实申报；开发者不接收聊天，不等于扩展不处理聊天内容和临时令牌。
+5. Privacy policy URL：先把 documents/privacy-policy.html 发布到你控制的公开 HTTPS 地址，或将 Edge 专用政策文件推送到公开 GitHub。发布后用未登录浏览器检查，才能将真实网址填入后台。此材料包没有虚构已发布网址。
+6. Store listings：添加简体中文，详细介绍粘贴 documents/store-description.txt；名称及简短介绍来自安装包 manifest。上传 assets/icon-128.png，达到最低图标要求。上传 assets/screenshot-01/02/03 对应的三张图，都是 1280×800；图中是扩展真实测试界面和合成聊天，非真实用户数据。截图界面与中文包对应。
+7. Notes for certification：粘贴 documents/reviewer-notes.txt。说明不提供私人 ChatGPT 凭据的原因及审核员自行创建测试对话的方法。微软是否接受解释以审核结果为准，必要时另行安排专用测试访问。
+8. 提交前在本人真实 Edge/ChatGPT 上测试：安装后刷新聊天页；目录定位；勾选不连续问答；MD/HTML 导出；含图片导出；断网打开 HTML；取消下载及切换会话。自动化模拟测试不能代替此检查。
+9. 确认以上各项后再点击最终 Publish。本材料仅在本地准备，没有上传、发布隐私页或提交商店审核。
+
+你本人还需完成：开发者账号验证、真实联系地址及邮箱、公开 Edge 隐私政策网址、发布市场选择、真实 Edge 最终测试。若后台要求额外身份资料，按账号类型提供真实材料。
+
+可选素材：300×300 Logo、440×280 小宣传图、1400×560 大宣传图、YouTube 视频。首次提交不必为可选项等待。
+
+material-report.json：列出文件尺寸、哈希和截图来源声明。preview/ 是截图排版源文件，不上传到插件包。
+生成命令：node scripts/prepare-edge-materials.mjs
+官方步骤：https://learn.microsoft.com/en-us/microsoft-edge/extensions/publish/publish-extension
+官方政策：https://learn.microsoft.com/en-us/legal/microsoft-edge/extensions/developer-policies

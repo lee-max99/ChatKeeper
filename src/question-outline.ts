@@ -8,8 +8,22 @@ const USER = '[data-message-author-role="user"]';
 const ASSISTANT = '[data-message-author-role="assistant"], [data-message-role="assistant"], [data-turn="assistant"]';
 const TURN = '[data-testid^="conversation-turn-"], [data-turn]';
 const USER_CONTENT = `${USER}, [data-testid="user-message"], .user-message-bubble-color, [data-message-role="user"]`;
+const BLOCK = /^(ADDRESS|ARTICLE|BLOCKQUOTE|DD|DETAILS|DIV|DL|DT|FIGCAPTION|FIGURE|H[1-6]|HEADER|HR|LI|MAIN|OL|P|PRE|SECTION|TABLE|TBODY|TD|TFOOT|TH|THEAD|TR|UL)$/;
 
-function questionText(element: HTMLElement, separator = ' '): string {
+// Only layout boundaries separate text: inline emphasis must not turn “共12篇” into “共 12 篇”.
+function flowText(root: Node): string {
+  const parts: string[] = [];
+  const visit = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) { parts.push(node.textContent || ''); return; }
+    const boundary = node.nodeType === Node.ELEMENT_NODE && (node.nodeName === 'BR' || BLOCK.test(node.nodeName));
+    if (boundary) parts.push(' ');
+    node.childNodes.forEach(visit);
+    if (boundary) parts.push(' ');
+  };
+  visit(root);return parts.join('');
+}
+
+function questionText(element: HTMLElement, separator?: ''): string {
   const clone = element.cloneNode(true) as HTMLElement;
   const originals = [...element.querySelectorAll('*')]; const copies = [...clone.querySelectorAll('*')];
   originals.forEach((node, index) => {
@@ -22,6 +36,7 @@ function questionText(element: HTMLElement, separator = ' '): string {
     if (/^(编辑(?:消息)?|复制(?:消息)?|edit(?: message)?|copy(?: message)?)$/i.test(label) || !label) node.remove();
   });
   clone.querySelectorAll('img').forEach(node => node.replaceWith(element.ownerDocument.createTextNode(node.alt || '图片')));
+  if (separator === undefined) return normalized(flowText(clone));
   const walker = element.ownerDocument.createTreeWalker(clone, NodeFilter.SHOW_TEXT); const parts: string[] = [];
   while (walker.nextNode()) parts.push(walker.currentNode.textContent || '');
   return parts.join(separator).replace(/\s+/g, ' ').trim();
@@ -89,9 +104,9 @@ export function savedQuestionOutline(data: Conversation, doc: Document): Outline
       const template = doc.createElement('template');
       template.innerHTML = message.markdown !== undefined ? markdownToHtml(message.markdown) : message.html;
       template.content.querySelectorAll('img').forEach(img => img.replaceWith(doc.createTextNode(img.alt || '图片')));
-      const text = normalized(template.content.textContent || '') || '图片或附件';
+      const text = normalized(flowText(template.content)) || '图片或附件';
       if (message.role !== 'user') {
-        answerTexts.add(text); answerTexts.add(normalized(message.markdown || text));
+        answerTexts.add(text); answerTexts.add(normalized(template.content.textContent || '')); answerTexts.add(normalized(message.markdown || text));
         const walker = doc.createTreeWalker(template.content, NodeFilter.SHOW_TEXT); const parts: string[] = [];
         while (walker.nextNode()) parts.push(walker.currentNode.textContent || '');
         answerTexts.add(normalized(parts.join(' '))); return [];
@@ -116,11 +131,18 @@ export function savedQuestionOutline(data: Conversation, doc: Document): Outline
       let element = walker.currentNode.parentElement;
       if (!walker.currentNode.textContent?.trim() || element?.closest(`nav, aside, form, button, script, style, ${ASSISTANT}`)) continue;
       for (let depth = 0; element && element !== scope && depth < 4; depth++, element = element.parentElement) {
-        if (desired.has(normalized(element.textContent || ''))) candidates.add(element);
+        if (desired.has(normalized(element.textContent || '')) || desired.has(normalized(flowText(element)))) candidates.add(element);
       }
     }
   }
-  const ordered = [...candidates].filter(element => visible(element) && !element.closest(`nav, aside, form, ${ASSISTANT}`))
+  const messageLocal = (element: HTMLElement) => {
+    if (element.querySelector(ASSISTANT)) return false;
+    const turns = [...element.querySelectorAll(TURN)];
+    // Nested markers may describe one turn; sibling turns must never be concatenated into a prompt.
+    if (turns.filter(turn => !turns.some(other => other !== turn && other.contains(turn))).length > 1) return false;
+    return knownQuestions.filter(question => element.contains(question.element)).length <= 1;
+  };
+  const ordered = [...candidates].filter(element => visible(element) && !element.closest(`nav, aside, form, ${ASSISTANT}`) && messageLocal(element))
     .sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
   const used: HTMLElement[] = [];
   const outline: OutlineEntry[] = saved.map(entry => ({ text: entry.text, identity: entry.identity, element: null, target: null }));
@@ -147,13 +169,17 @@ export function savedQuestionOutline(data: Conversation, doc: Document): Outline
     const texts = new Set(indices.flatMap(index => [saved[index].text, saved[index].raw]));
     const matches: HTMLElement[] = [];
     for (const element of available()) {
+      // A known bubble is the text boundary. Its ancestors may also contain an unmarked reply.
+      // Identified wrappers were already handled above; fallback text must use the bubble itself.
+      if (knownQuestions.some(question => question.element !== element && element.contains(question.element))) continue;
       const text = normalized(element.textContent || '');
+      const flow = knownTexts.get(element) || normalized(flowText(element));
       const knownUser = knownQuestions.some(question => question.element.contains(element));
       // Unmarked text also appearing in an answer could be a quoted paragraph, not a loaded prompt.
       // Remove controls before reserving exact inline text, so inserted layout spaces cannot steal its match.
       const rawText = knownRawTexts.get(element) || text;
-      const matchesText = texts.has(text) || texts.has(rawText) || (!desired.has(text) && !desired.has(rawText) && texts.has(knownTexts.get(element) || ''));
-      if (matchesText && (knownUser || !answerTexts.some(answer => answer.includes(text))) && !matches.some(match => overlaps(targetOf(match), targetOf(element)))) matches.push(element);
+      const matchesText = texts.has(text) || texts.has(rawText) || (!desired.has(text) && !desired.has(rawText) && texts.has(flow));
+      if (matchesText && (knownUser || !answerTexts.some(answer => answer.includes(text) || answer.includes(flow))) && !matches.some(match => overlaps(targetOf(match), targetOf(element)))) matches.push(element);
     }
     // Partial loading makes identical prompts ambiguous. Keep the directory but defer jumping.
     if (matches.length === indices.length) indices.forEach((index, offset) => bind(index, matches[offset]));

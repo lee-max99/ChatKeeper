@@ -1,0 +1,30 @@
+Edge 隐私填写参考（提交前对照最终包）
+
+Single purpose:
+Navigate and export the currently opened, saved ChatGPT conversation as Markdown or offline HTML.
+
+Permission justification（按后台对应字段分别填写）:
+activeTab: Access the active ChatGPT tab when the user invokes the toolbar export interface.
+scripting: Run bundled reading and export code in the active ChatGPT page.
+downloads: Save user-requested export files and check the status of downloads created by this extension.
+storage: Remember local outline visibility, position and export format. Conversation contents and access tokens are not stored in extension settings.
+https://*.oaiusercontent.com/*: Fetch ChatGPT image CDN resources for embedding in user-requested exports, without forwarding the ChatGPT access token or login credentials to the CDN.
+Content script match https://chatgpt.com/*: Display the question outline and follow changes within the current ChatGPT conversation.
+
+Remote code:
+当前项目声明不使用远程可执行代码，脚本和转换库随包提供。获取对话 JSON 或图片不等于执行远程代码；提交前需确认最终包确实如此。
+
+Data usage:
+会处理聊天正文、标题、附件信息、消息标识、当前会话网址及导航状态；临时使用 ChatGPT 会话令牌读取当前会话。设置保存在浏览器本地；导出文件保存在用户本地；开发者不接收聊天或令牌。图片读取会联系图片来源站点。按照后台对 Website content、Authentication information、Web history、User activity 等类别及 collected 的具体定义逐项判断；不能把“开发者不接收”写成“不访问用户数据”。Edge 专用政策见 privacy-policy.md / privacy-policy.html，必须发布后才能填写其公开 URL。
+
+Reviewer notes（以下英文可粘贴）:
+ChatKeeper navigates and exports the currently opened, saved ChatGPT conversation. The interface is in Simplified Chinese. No ChatKeeper account, subscription or OpenAI API key is required. ChatGPT authentication is required: please use a reviewer-controlled ChatGPT account and create a saved conversation with at least two questions. Temporary chats and shared pages are unsupported.
+
+Why no shared credentials are supplied: ChatKeeper has no publisher-operated login service. Its only login requirement is a session with the independent third-party ChatGPT service. Sharing the publisher personal ChatGPT credentials would expose private conversations and session information. Please use a reviewer-controlled account and create non-sensitive test conversations. Basic text export requires no paid ChatKeeper feature or API key. ChatGPT availability and image-generation entitlement depend on that third-party service and the reviewer account. If this access arrangement is insufficient, please contact the publisher through the support link to arrange an acceptable test method; do not use private tokens or cookies supplied in public materials.
+
+After installation, refresh the ChatGPT tab. Open the small button on the right of the page to view the question outline. Click a question to navigate. Open selection mode and select two question/answer groups. Export the selected groups as Markdown or HTML; also test exporting the entire conversation through the outline or toolbar popup. Open the HTML locally and test outline navigation, search, code copying and printing. For image testing, use an accessible conversation image; exporting attempts to embed supported images and reports failures.
+
+The extension reads the current conversation through ChatGPT's same-origin session and conversation endpoints. The temporary access token stays in page memory and is not written to export files or extension settings or sent to the developer. Image export may request source images, including the ChatGPT image CDN; CDN requests do not receive the ChatGPT access token. There is no developer-operated upload, telemetry or advertising endpoint. All executable extension code is bundled locally. Offline HTML does not automatically load remote images, fonts or scripts.
+
+The extension depends on ChatGPT's internal web interfaces. Unsupported interactive components may be reduced to static text/data and are not guaranteed to match the live interface. It exports one conversation branch, not the entire account history.
+Support: https://github.com/lee-max99/ChatKeeper/issues

@@ -22,6 +22,14 @@ it('jumps immediately to loaded questions without loading or changing the scroll
   expect(await navigateQuestion(f.recent, () => f.entries, () => true, () => {})).toBe('found');
   expect(f.jump).toHaveBeenCalledOnce(); expect(f.scroll).not.toHaveBeenCalled();
 });
+it('does not treat an unmatched question between loaded neighbours as history above the first conversation', async () => {
+  const f=fixture();const progress=vi.fn();
+  f.entries.unshift({...f.recent,identity:'previous'});
+  const result=navigateQuestion(f.old,()=>f.entries,()=>true,progress);
+  await vi.advanceTimersByTimeAsync(46_000);
+  expect(await result).toBe('unavailable');
+  expect(f.scroll).not.toHaveBeenCalled();expect(f.jump).not.toHaveBeenCalled();expect(progress).not.toHaveBeenCalled();
+});
 it('briefly emphasizes the located question without overwriting its page styles',async () => {
   const f = fixture();const target = f.recent.target!;
   const animate = vi.fn(() => ({cancel:() => {}} as Animation));target.animate = animate;
